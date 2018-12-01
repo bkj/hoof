@@ -16,22 +16,28 @@ from sklearn.model_selection import train_test_split
 np.random.seed(123)
 
 
-n_toks = 1000
-n_obs  = 100
+n_toks = 10000
+n_obs  = 1000
 
-p = 10 ** np.random.uniform(-5, 0, n_toks).reshape(1, -1)
-q = 10 ** np.random.uniform(-5, 0, n_toks).reshape(1, -1)
+p = 10 ** np.random.uniform(-5, -2, n_toks).reshape(1, -1)
+q = 10 ** np.random.uniform(-5, -2, n_toks).reshape(1, -1)
 
 pos = np.random.uniform(0, 1, (n_obs, n_toks)) < p
 neg = np.random.uniform(0, 1, (n_obs, n_toks)) < q
 
-X = np.vstack([pos, neg])
+X = np.vstack([pos, neg]).astype(np.float)
+
 X /= np.sqrt((X ** 2).sum(axis=-1, keepdims=True))
 y   = np.hstack([
     np.ones(pos.shape[0]),
     np.zeros(neg.shape[0])
 ])
 
+X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.5)
+
+svc = LinearSVC(C=10)
+svc = svc.fit(X_train, y_train)
+(svc.predict(X_test) == y_test).mean()
 
 
 # --
