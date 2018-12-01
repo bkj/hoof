@@ -13,20 +13,13 @@ from torch import nn
 from rsub import *
 from matplotlib import pyplot as plt
 
-from dataset import SinusoidDataset
+from dataset import SinusoidDataset, CacheDataset
 from models import ALPACA
+from helpers import set_seeds, to_numpy
 
 torch.set_num_threads(1)
 
-_ = np.random.seed(123)
-_ = torch.manual_seed(123 + 111)
-_ = torch.cuda.manual_seed(123 + 222)
-
-def to_numpy(x):
-    if isinstance(x, np.ndarray):
-        return x
-    else:
-        return x.cpu().detach().numpy()
+set_seeds(123)
 
 # --
 # Helpers
@@ -60,6 +53,7 @@ def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, t
 # Train
 
 dataset = SinusoidDataset(sigma_eps=0.00)
+cache_dataset = CacheDataset(dataset, n_batches=2000, n_funcs=10, train_samples=5, test_samples=5)
 model   = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 opt     = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -72,6 +66,8 @@ _ = plt.grid()
 show_plot()
 
 np.mean(loss_history[-200:])
+
+model.sig_eps
 
 # --
 # Plot example

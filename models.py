@@ -9,10 +9,11 @@ from torch import nn
 
 class ALPACA(nn.Module):
     # !! ignoring `f_nom` from the original
-    def __init__(self, x_dim, y_dim, sig_eps, num=1):
+    def __init__(self, x_dim, y_dim, sig_eps, num=1, activation='tanh'):
         super().__init__()
         
-        self.sig_eps = torch.eye(y_dim) * sig_eps
+        self.sig_eps  = sig_eps
+        self.eye      = torch.eye(y_dim)
         
         # Seems to work OK even if this is not trainable
         self.K      = nn.Parameter(torch.zeros(32, y_dim)) # last layer size
@@ -21,13 +22,20 @@ class ALPACA(nn.Module):
         torch.nn.init.xavier_uniform_(self.K)
         torch.nn.init.xavier_uniform_(self.L_asym)
         
+        if activation == 'tanh':
+            act = nn.Tanh
+        elif activation  == 'relu':
+            act = nn.ReLU
+        else:
+            raise Exception('!! unknown activation %s' % activation)
+        
         self.backbone = nn.Sequential(
             nn.Linear(x_dim, 128),
-            nn.Tanh(),
+            act(),
             nn.Linear(128, 128),
-            nn.Tanh(),
+            act(),
             nn.Linear(128, 32),
-            nn.Tanh() # Do we want this?
+            act() # Do we want this?
         )
         
         self.num   = num
@@ -66,11 +74,11 @@ class ALPACA(nn.Module):
         mu_pred = torch.bmm(phi, posterior_K)
         
         spread_fac = 1 + self.batch_quadform(posterior_L_inv, phi)
-        sig_pred = spread_fac.unsqueeze(-1) * self.sig_eps.view(1, 1, self.y_dim, self.y_dim)
+        sig_pred = spread_fac.unsqueeze(-1) * self.eye.view(1, 1, self.y_dim, self.y_dim) * self.sig_eps
         
         predictive_nll = None
         if y is not None:
-            logdet = self.y_dim * spread_fac.log() + self.sig_eps.logdet()
+            logdet = self.y_dim * spread_fac.log() + (self.eye * self.sig_eps).logdet()
             quadf  = self.batch_quadform2(self.batch_inv(sig_pred), y - mu_pred)
             predictive_nll = (logdet + quadf).mean()
         
