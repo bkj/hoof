@@ -12,12 +12,14 @@ class ALPACA(nn.Module):
     def __init__(self, x_dim, y_dim, sig_eps, num=1, activation='tanh'):
         super().__init__()
         
+        final_dim = 128
+        
         self.sig_eps  = sig_eps
         self.eye      = torch.eye(y_dim)
         
         # Seems to work OK even if this is not trainable
-        self.K      = nn.Parameter(torch.zeros(32, y_dim)) # last layer size
-        self.L_asym = nn.Parameter(torch.randn(32, 32))    # last layer size
+        self.K      = nn.Parameter(torch.zeros(final_dim, y_dim)) # last layer size
+        self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim))    # last layer size
         
         torch.nn.init.xavier_uniform_(self.K)
         torch.nn.init.xavier_uniform_(self.L_asym)
@@ -34,7 +36,7 @@ class ALPACA(nn.Module):
             act(),
             nn.Linear(128, 128),
             act(),
-            nn.Linear(128, 32),
+            nn.Linear(128, final_dim),
             act() # Do we want this?
         )
         

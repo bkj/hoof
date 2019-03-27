@@ -13,14 +13,13 @@ from torch import nn
 from rsub import *
 from matplotlib import pyplot as plt
 
-from dataset import SinusoidDataset
+from dataset import SinusoidDataset, PowerDataset
 from models import ALPACA
 from helpers import set_seeds, to_numpy
 
 torch.set_num_threads(1)
 
 set_seeds(123)
-
 
 # --
 # Helpers
@@ -61,16 +60,24 @@ def active_batch(model, dataset, batch_size, train_samples, test_samples):
     
     x_c, y_c, x, y = list(map(torch.FloatTensor, (x_c, y_c, x, y)))
     
-    x_grid = torch.FloatTensor(torch.arange(-5, 5, 0.1))
+    x_grid = torch.FloatTensor(torch.arange(*dataset.x_lim, 0.1))
     x_grid_batch = x_grid.view(1, x_grid.shape[0], 1)
     x_grid_batch = x_grid_batch.repeat(batch_size, 1, 1)
     
     for nobs in range(1, train_samples):
         
-        _, sig, _ = model(x_c, y_c, x_grid_batch)
+        mu, sig, _ = model(x_c, y_c, x_grid_batch)
         
-        new_x = x_grid[sig.squeeze().max(dim=-1)[1]]
+        sel = sig.squeeze().max(dim=-1)[1]
+        
+        # print(sig.squeeze())
+        
+        # >>
+        new_x = x_grid[sel]
+        new_x = new_x.view(-1, 1)
         new_y = torch.stack([f(xx) for xx, f in zip(new_x, fns)])
+        # new_y = torch.FloatTensor(new_y)
+        # <<
         
         x_c = torch.cat([x_c, new_x.view(batch_size, 1, 1)], dim=1)
         y_c = torch.cat([y_c, new_y.view(batch_size, 1, 1)], dim=1)
@@ -107,28 +114,39 @@ def active_train(model, opt, dataset, batch_size=10, train_samples=5, test_sampl
 # --
 # Params
 
-init_steps   = 500
-active_steps = 1000
+init_steps   = 1000
+active_steps = 500
 
 train_samples = 5
-test_samples  = 10
+test_samples  = 20
 
-dataset = SinusoidDataset(sigma_eps=0.00)
+# dataset = SinusoidDataset(sigma_eps=0.00)
+dataset = PowerDataset()
 
 # --
 # Active learning
 
 model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 
-opt = torch.optim.Adam(model.parameters(), lr=1e-3)
-active_loss_history = train(model, opt, dataset, train_steps=init_steps,
-    test_samples=test_samples, 
-    train_samples=train_samples)
-
 opt = torch.optim.Adam(model.parameters(), lr=1e-4)
-active_loss_history += active_train(model, opt, dataset, train_steps=active_steps,
+active_loss_history = train(
+    model=model,
+    opt=opt, 
+    dataset=dataset,
+    train_steps=init_steps,
     test_samples=test_samples, 
-    train_samples=train_samples)
+    train_samples=train_samples
+)
+
+opt = torch.optim.Adam(model.parameters(), lr=1e-5)
+active_loss_history += active_train(
+    model=model,
+    opt=opt, 
+    dataset=dataset, 
+    train_steps=active_steps,
+    test_samples=test_samples, 
+    train_samples=train_samples
+)
 
 # --
 # Control
@@ -170,8 +188,8 @@ x_c, y_c, _, _, fns = active_batch(
 
 x_c, y_c = x_c[:1], y_c[:1]
 
-x_eval = np.arange(-5, 5, 0.1)
-y_act  = fns[0](x_eval, noise=False)
+x_eval = np.arange(*dataset.x_lim, 0.01)
+y_act  = fns[0](x_eval)
 
 x_c, y_c, x_eval = list(map(torch.FloatTensor, [x_c, y_c, x_eval]))
 mu, sig, _ = model(x_c, y_c, x_eval.unsqueeze(0).unsqueeze(-1))
@@ -182,9 +200,18 @@ _ = plt.scatter(x_c, y_c, c='black')
 _ = plt.plot(x_eval, y_act, c='black')
 _ = plt.plot(x_eval, mu)
 _ = plt.fill_between(x_eval, mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
-_ = plt.xlim(-5, 5)
+_ = plt.xlim(*dataset.x_lim)
 
 for i, txt in enumerate(range(train_samples)):
     _ = plt.annotate(txt, (float(x_c[i]), float(y_c[i])), color='red')
+
+show_plot()
+
+# --
+
+x_c, y_c, *_ = dataset.sample(n_funcs=100, train_samples=100, test_samples=0)
+
+for xx, yy in zip(x_c, y_c):
+    _ = plt.plot(xx.squeeze(), yy.squeeze(), alpha=0.2)
 
 show_plot()

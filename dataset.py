@@ -53,6 +53,81 @@ class SinusoidDataset:
         return x_c, y_c, x, y, funcs
 
 # --
+# Make pow func
+
+def _make_pow_func(p, rng):
+    def _f(x):
+        y = x ** p
+        return y
+    
+    return _f
+
+class PowerDataset:
+    def __init__(self, x_lim=[0, 1]):
+        self.x_lim = x_lim
+    
+    def sample(self, n_funcs, train_samples, test_samples, rng=None):
+        if rng is None:
+            rng = np.random
+        
+        x_c = rng.uniform(*self.x_lim, (n_funcs, train_samples, 1))
+        x   = rng.uniform(*self.x_lim, (n_funcs, test_samples, 1))
+        
+        y_c = np.zeros((n_funcs, train_samples, 1))
+        y   = np.zeros((n_funcs, test_samples, 1))
+        
+        funcs = []
+        for i in range(n_funcs):
+            
+            p = rng.uniform(1, 5)
+            
+            _f     = _make_pow_func(p, rng)
+            y_c[i] = _f(x_c[i])
+            y[i]   = _f(x[i])
+            
+            funcs.append(copy(_f))
+        
+        return x_c, y_c, x, y, funcs
+
+# --
+
+def _make_quadratic_func(xo, yo, rng):
+    def _f(x):
+        y = (x + xo) ** 2 + yo
+        return y
+    
+    return _f
+
+class QuadraticDataset:
+    def __init__(self, x_lim=[-2, -2]):
+        self.x_lim = x_lim
+    
+    def sample(self, n_funcs, train_samples, test_samples, rng=None):
+        if rng is None:
+            rng = np.random
+        
+        x_c = rng.uniform(*self.x_lim, (n_funcs, train_samples, 1))
+        x   = rng.uniform(*self.x_lim, (n_funcs, test_samples, 1))
+        
+        y_c = np.zeros((n_funcs, train_samples, 1))
+        y   = np.zeros((n_funcs, test_samples, 1))
+        
+        funcs = []
+        for i in range(n_funcs):
+            
+            xo = rng.uniform(-1, 1)
+            yo = rng.uniform(-1, 1)
+            
+            _f     = _make_quadratic_func(xo, yo, rng)
+            y_c[i] = _f(x_c[i])
+            y[i]   = _f(x[i])
+            
+            funcs.append(copy(_f))
+        
+        return x_c, y_c, x, y, funcs
+
+
+# --
 
 import warnings
 warnings.filterwarnings("ignore", category=FutureWarning)
