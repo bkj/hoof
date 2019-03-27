@@ -19,13 +19,13 @@ def _make_sin_func(amp, phase, freq, noise_std, rng):
 
 class SinusoidDataset:
     def __init__(self, amp_range=[0.1, 5.0], phase_range=[0, 3.14], 
-        freq_range=[0.999, 1.0], x_range=[-5, 5], sigma_eps=0.02):
+        freq_range=[0.999, 1.0], x_range=[-5, 5], sig_eps=0.02):
         
         self.amp_range   = amp_range
         self.phase_range = phase_range
         self.freq_range  = freq_range
         self.x_range     = x_range
-        self.noise_std   = np.sqrt(sigma_eps)
+        self.noise_std   = np.sqrt(sig_eps)
         
     def sample(self, n_funcs, train_samples, test_samples, rng=None):
         if rng is None:
@@ -63,15 +63,15 @@ def _make_pow_func(p, rng):
     return _f
 
 class PowerDataset:
-    def __init__(self, x_lim=[0, 1]):
-        self.x_lim = x_lim
+    def __init__(self, x_range=[0, 1]):
+        self.x_range = x_range
     
     def sample(self, n_funcs, train_samples, test_samples, rng=None):
         if rng is None:
             rng = np.random
         
-        x_c = rng.uniform(*self.x_lim, (n_funcs, train_samples, 1))
-        x   = rng.uniform(*self.x_lim, (n_funcs, test_samples, 1))
+        x_c = rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
+        x   = rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
         
         y_c = np.zeros((n_funcs, train_samples, 1))
         y   = np.zeros((n_funcs, test_samples, 1))
@@ -99,15 +99,15 @@ def _make_quadratic_func(xo, yo, rng):
     return _f
 
 class QuadraticDataset:
-    def __init__(self, x_lim=[-2, -2]):
-        self.x_lim = x_lim
+    def __init__(self, x_range=[-2, -2]):
+        self.x_range = x_range
     
     def sample(self, n_funcs, train_samples, test_samples, rng=None):
         if rng is None:
             rng = np.random
         
-        x_c = rng.uniform(*self.x_lim, (n_funcs, train_samples, 1))
-        x   = rng.uniform(*self.x_lim, (n_funcs, test_samples, 1))
+        x_c = rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
+        x   = rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
         
         y_c = np.zeros((n_funcs, train_samples, 1))
         y   = np.zeros((n_funcs, test_samples, 1))

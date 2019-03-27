@@ -13,10 +13,10 @@ from torch import nn
 from rsub import *
 from matplotlib import pyplot as plt
 
-from dataset import SinusoidDataset, PowerDataset, QuadraticDataset
-from dataset import CacheDataset
-from models import ALPACA
-from helpers import set_seeds, to_numpy
+from hoof.dataset import SinusoidDataset, PowerDataset, QuadraticDataset
+from hoof.dataset import CacheDataset
+from hoof.models import ALPACA
+from hoof.helpers import set_seeds, to_numpy
 
 torch.set_num_threads(1)
 
@@ -31,8 +31,8 @@ def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, t
     for i in gen:
         x_c, y_c, x, y, _ = dataset.sample(
             n_funcs=batch_size,
-            train_samples=train_samples, # Can sample these for robustness
-            test_samples=test_samples,   # Can sample these for robustness
+            train_samples=train_samples, # Could sample this horizon for robustness
+            test_samples=test_samples,   # Could sample this horizon for robustness
         )
         
         x_c, y_c, x, y = list(map(torch.FloatTensor, (x_c, y_c, x, y)))
@@ -50,38 +50,29 @@ def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, t
         
     return loss_history
 
+
+
 # --
 # Train
 
-# dataset = SinusoidDataset(sigma_eps=0.00)
-# dataset = PowerDataset()
-dataset = QuadraticDataset()
-
+dataset = SinusoidDataset(sigma_eps=0.00)
 model   = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 
-opt     = torch.optim.Adam(model.parameters(), lr=1e-3)
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 loss_history = train(model, opt, dataset)
-
-opt     = torch.optim.Adam(model.parameters(), lr=1e-4)
-loss_history += train(model, opt, dataset)
 
 _ = plt.plot(loss_history)
 _ = plt.yscale('log')
-# _ = plt.ylim(1e-4, 1e1)
 _ = plt.grid()
 show_plot()
-
-np.mean(loss_history[-200:])
-
-model.sig_eps
 
 # --
 # Plot example
 
-dataset = PowerDataset()
+dataset = SinusoidDataset(sigma_eps=0.00)
 x_c, y_c, _, _, fns = dataset.sample(n_funcs=1, train_samples=5, test_samples=0)
 
-x_eval = np.arange(*dataset.x_lim, 0.01)
+x_eval = np.arange(*dataset.x_range, 0.01)
 y_act  = fns[0](x_eval)
 
 x_c, y_c, x_eval = list(map(torch.FloatTensor, [x_c, y_c, x_eval]))
