@@ -10,14 +10,12 @@ from tqdm import tqdm, trange
 
 import torch
 from torch import nn
-# torch.set_default_tensor_type('torch.DoubleTensor')
 
 from rsub import *
 from matplotlib import pyplot as plt
 
-from hoof.dataset import SinusoidDataset, PowerDataset, QuadraticDataset
-from hoof.dataset import CacheDataset
-from hoof.models import ALPACA, ALPACA2
+from hoof.dataset import SinusoidDataset
+from hoof.models import ALPACA
 from hoof.helpers import set_seeds, to_numpy
 
 torch.set_num_threads(1)
@@ -67,14 +65,17 @@ model     = model.cuda()
 model.eye = model.eye.cuda()
 
 loss_history = []
-for lr in [1e-3, 1e-4, 1e-5]:
-    opt = torch.optim.Adam(model.parameters(), lr=lr)
+lrs = [1e-3, 1e-4, 1e-5]
+opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
+for lr in lrs:
+    for p in opt.param_groups:
+            p['lr'] = lr
+    
     loss_history += train(model, opt, dataset, batch_size=128, train_batches=30000)
-
-_ = plt.plot(loss_history)
-_ = plt.yscale('log')
-_ = plt.grid()
-show_plot()
+    _ = plt.plot(loss_history)
+    _ = plt.yscale('log')
+    _ = plt.grid()
+    show_plot()
 
 # --
 # Plot example

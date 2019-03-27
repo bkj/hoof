@@ -22,9 +22,10 @@ class ALPACA(nn.Module):
         self.sig_eps  = sig_eps
         self.eye      = torch.eye(y_dim)
         
-        # Seems to work OK even if this is not trainable
-        self.K      = nn.Parameter(torch.zeros(final_dim, y_dim)) # last layer size
-        self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim))    # last layer size
+        # Seems to work OK even if these are not trainable (these are just the priors, so makes sense)
+        self.K      = nn.Parameter(torch.zeros(final_dim, y_dim))
+        self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim))
+        self.bias   = nn.Parameter(torch.zeros([1]))
         
         torch.nn.init.xavier_uniform_(self.K)
         torch.nn.init.xavier_uniform_(self.L_asym)
@@ -71,14 +72,10 @@ class ALPACA(nn.Module):
             posterior_K = torch.bmm(phi_c.transpose(1, 2), y_c) + torch.mm(L, self.K)
             posterior_K = torch.bmm(posterior_L_inv, posterior_K)
         else:
-            # nobs == 0 means we have no observations, so this is modeling the prior
-            # skip for now
-            raise Exception()
-            posterior_K, posterior_L_inv = self.K, torch.inverse(L)
-            posterior_K     = posterior_K.unsqueeze(0).repeat(30, 1, 1)
-            posterior_L_inv = posterior_L_inv.unsqueeze(0).repeat(30, 1, 1)
+            posterior_L_inv = self.batch_inv(L)
+            posterior_K     = self.K
         
-        mu_pred = torch.bmm(phi, posterior_K)
+        mu_pred = torch.bmm(phi, posterior_K) + self.bias
         
         spread_fac = 1 + self.batch_quadform(posterior_L_inv, phi)
         sig_pred = spread_fac.unsqueeze(-1) * self.eye.view(1, 1, self.y_dim, self.y_dim) * self.sig_eps
@@ -172,7 +169,9 @@ class ALPACA2(nn.Module):
             posterior_L_inv = torch.inverse((phi_c.transpose(1, 2) @ phi_c) + L[None,:])
             posterior_K     = posterior_L_inv @ ((phi_c.transpose(1, 2) @ y_c) + (L @ self.K))
         else:
-            raise Exception()
+            posterior_L_inv = torch.inverse(L)
+            posterior_K     = self.K # !! According to original code
+            
         
         phi = self.backbone(x)
         mu_pred = phi @ posterior_K
