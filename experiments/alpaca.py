@@ -25,6 +25,9 @@ set_seeds(123)
 # --
 # Helpers
 
+def mse(act, pred):
+    return float(((act - pred) ** 2).mean())
+
 def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, train_steps=2000):
     loss_history = []
     gen = tqdm(range(train_steps))
@@ -42,8 +45,7 @@ def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, t
         loss.backward()
         opt.step()
         
-        mse = float(((mu - y) ** 2).mean())
-        loss_history.append(mse)
+        loss_history.append(mse(mu, y))
         
         if not i % 100:
             gen.set_postfix(loss=np.mean(loss_history[-100:]))
@@ -55,7 +57,7 @@ def train(model, opt, dataset, batch_size=10, train_samples=5, test_samples=5, t
 # --
 # Train
 
-dataset = SinusoidDataset(sigma_eps=0.00)
+dataset = SinusoidDataset(sig_eps=0.00)
 model   = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 
 opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -69,7 +71,7 @@ show_plot()
 # --
 # Plot example
 
-dataset = SinusoidDataset(sigma_eps=0.00)
+dataset = SinusoidDataset(sig_eps=0.00)
 x_c, y_c, _, _, fns = dataset.sample(n_funcs=1, train_samples=5, test_samples=0)
 
 x_eval = np.arange(*dataset.x_range, 0.01)
@@ -84,7 +86,6 @@ _ = plt.scatter(x_c, y_c, c='black')
 _ = plt.plot(x_eval, y_act, c='black')
 _ = plt.plot(x_eval, mu)
 _ = plt.fill_between(x_eval, mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
-# _ = plt.xlim(-5, 5)
-_ = plt.xlim(0, 4)
+_ = plt.xlim(*dataset.x_range)
 show_plot()
 

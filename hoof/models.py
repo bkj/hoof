@@ -9,10 +9,8 @@ from torch import nn
 
 class ALPACA(nn.Module):
     # !! ignoring `f_nom` from the original
-    def __init__(self, x_dim, y_dim, sig_eps, num=1, activation='tanh'):
+    def __init__(self, x_dim, y_dim, sig_eps, num=1, activation='tanh', hidden_dim=128, final_dim=128):
         super().__init__()
-        
-        final_dim = 128
         
         self.sig_eps  = sig_eps
         self.eye      = torch.eye(y_dim)
@@ -25,19 +23,19 @@ class ALPACA(nn.Module):
         torch.nn.init.xavier_uniform_(self.L_asym)
         
         if activation == 'tanh':
-            act = nn.Tanh
+            _act = nn.Tanh
         elif activation  == 'relu':
-            act = nn.ReLU
+            _act = nn.ReLU
         else:
             raise Exception('!! unknown activation %s' % activation)
         
         self.backbone = nn.Sequential(
-            nn.Linear(x_dim, 128),
-            act(),
-            nn.Linear(128, 128),
-            act(),
-            nn.Linear(128, final_dim),
-            act() # Do we want this?
+            nn.Linear(x_dim, hidden_dim),
+            _act(),
+            nn.Linear(hidden_dim, hidden_dim),
+            _act(),
+            nn.Linear(hidden_dim, final_dim),
+            _act() # Do we want this?
         )
         
         self.num   = num
