@@ -120,8 +120,8 @@ active_steps = 500
 train_samples = 5
 test_samples  = 20
 
-# dataset = SinusoidDataset(sigma_eps=0.00)
-dataset = PowerDataset()
+dataset = SinusoidDataset(sigma_eps=0.00)
+# dataset = PowerDataset()
 
 # --
 # Active learning
