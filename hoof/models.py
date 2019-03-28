@@ -90,7 +90,7 @@ class BLR(nn.Module):
 # NN Helper
 
 class _TrainMixin:
-    def train(self, opt, dataset, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
+    def _run_epoch(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
         hist = []
         gen = trange(num_samples // batch_size)
         for batch_idx in gen:
@@ -102,10 +102,14 @@ class _TrainMixin:
             
             inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
             
-            opt.zero_grad()
-            mu, sig, loss = self(*inp)
-            loss.backward()
-            opt.step()
+            if opt is not None:
+                opt.zero_grad()
+                mu, sig, loss = self(*inp)
+                loss.backward()
+                opt.step()
+            else:
+                with torch.no_grad():
+                    mu, sig, loss = self(*inp)
             
             hist.append(metric_fn(y_query, to_numpy(mu)))
             
@@ -114,26 +118,12 @@ class _TrainMixin:
             
         return hist
     
-    def valid(self, dataset, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
-        hist = []
-        gen = trange(num_samples // batch_size)
-        for batch_idx in gen:
-            x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
-                batch_size=batch_size,
-                support_size=support_size, # Could sample this horizon for robustness
-                query_size=query_size,     # Could sample this horizon for robustness
-            )
-            
-            inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
-            
-            with torch.no_grad():
-                mu, sig, loss = self(*inp)
-            
-            hist.append(metric_fn(y_query, to_numpy(mu)))
-            if not batch_idx % 10:
-                gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
-        
-        return hist
+    def train(self, dataset, opt, **kwargs):
+        return self._run_epoch(dataset, opt, **kwargs)
+    
+    def valid(self, dataset, opt=None, **kwargs):
+        assert opt is None
+        return self._run_epoch(dataset, opt=None, **kwargs)
 
 # --
 # ALPACA

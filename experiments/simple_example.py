@@ -48,7 +48,7 @@ for lr in lrs:
     for p in opt.param_groups:
             p['lr'] = lr
     
-    train_history += model.train(opt, train_dataset, **train_kwargs)
+    train_history += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
@@ -57,7 +57,7 @@ for lr in lrs:
     show_plot()
 
 
-valid_history = model.valid(valid_dataset, **train_kwargs)
+valid_history = model.valid(dataset=valid_dataset, **train_kwargs)
 
 print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
 print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
