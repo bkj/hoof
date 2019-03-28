@@ -58,17 +58,17 @@ def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, trai
 # --
 # Train
 
-dataset = 'power'
+dataset = 'sinusoid'
 
 if dataset == 'sinusoid':
     train_dataset = SinusoidDataset(noise_std=0.0)
     valid_dataset = SinusoidDataset(noise_std=0.0)
-    model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.01, hidden_dim=32, final_dim=32, activation='tanh')
 elif dataset == 'power':
     train_dataset = PowerDataset()
     valid_dataset = PowerDataset()
-    model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.001, hidden_dim=32, final_dim=32, activation='tanh')
 
+
+model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.01, hidden_dim=128, final_dim=128, activation='tanh')
 model = model.cuda()
 
 loss_history = []
