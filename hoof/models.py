@@ -20,7 +20,7 @@ class ALPACA(nn.Module):
         super().__init__()
         
         self.sig_eps  = sig_eps
-        self.eye      = torch.eye(y_dim)
+        self.register_buffer('eye', torch.eye(y_dim))
         
         # Seems to work OK even if these are not trainable (these are just the priors, so makes sense)
         self.K      = nn.Parameter(torch.zeros(final_dim, y_dim))
@@ -50,12 +50,20 @@ class ALPACA(nn.Module):
         self.x_dim = x_dim
         self.y_dim = y_dim
     
+    @property
+    def is_cuda(self):
+        return next(self.parameters()).is_cuda
+    
     def forward(self, x_c, y_c, x, y=None):
         assert x_c.shape[-1] == self.x_dim
         assert y_c.shape[-1] == self.y_dim
         assert x.shape[-1] == self.x_dim
         if y is not None:
             assert y.shape[-1] == self.y_dim
+        
+        if len(x_c.shape) == 2: x_c = x_c[None,:]
+        if len(y_c.shape) == 2: y_c = y_c[None,:]
+        if len(x.shape) == 2:   x = x[None,:]
         
         L = torch.mm(self.L_asym, self.L_asym.t())
         
@@ -120,85 +128,85 @@ class ALPACA(nn.Module):
         out = out.reshape(bs, hor, 1)
         return out
 
-# --
-# Simplified version of the above
-# Has not been tested to guarantee same results as original version
+# # --
+# # Simplified version of the above
+# # Has not been tested to guarantee same results as original version
 
-class ALPACA2(nn.Module):
-    # !! ignoring `f_nom` from the original
-    def __init__(self, x_dim, y_dim, sig_eps, activation='Tanh', hidden_dim=128, final_dim=128):
-        super().__init__()
+# class ALPACA2(nn.Module):
+#     # !! ignoring `f_nom` from the original
+#     def __init__(self, x_dim, y_dim, sig_eps, activation='Tanh', hidden_dim=128, final_dim=128):
+#         super().__init__()
         
-        self.sig_eps     = sig_eps
-        self.log_sig_eps = np.log(sig_eps)
-        self.sig_eps_eye = torch.eye(self.y_dim) * self.sig_eps
+#         self.sig_eps     = sig_eps
+#         self.log_sig_eps = np.log(sig_eps)
+#         self.sig_eps_eye = torch.eye(self.y_dim) * self.sig_eps
         
-        # Seems to work OK even if this is not trainable
-        self.K      = nn.Parameter(torch.zeros(final_dim, y_dim))     # last layer size
-        self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim)) # last layer size
+#         # Seems to work OK even if this is not trainable
+#         self.K      = nn.Parameter(torch.zeros(final_dim, y_dim))     # last layer size
+#         self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim)) # last layer size
         
-        torch.nn.init.xavier_uniform_(self.K)
-        torch.nn.init.xavier_uniform_(self.L_asym)
+#         torch.nn.init.xavier_uniform_(self.K)
+#         torch.nn.init.xavier_uniform_(self.L_asym)
         
-        _act = getattr(nn, activation)
-        self.backbone = nn.Sequential(
-            nn.Linear(x_dim, hidden_dim),
-            _act(),
-            nn.Linear(hidden_dim, hidden_dim),
-            _act(),
-            nn.Linear(hidden_dim, final_dim),
-            _act(), # Do we want this?
-        )
+#         _act = getattr(nn, activation)
+#         self.backbone = nn.Sequential(
+#             nn.Linear(x_dim, hidden_dim),
+#             _act(),
+#             nn.Linear(hidden_dim, hidden_dim),
+#             _act(),
+#             nn.Linear(hidden_dim, final_dim),
+#             _act(), # Do we want this?
+#         )
         
-        self.x_dim = x_dim
-        self.y_dim = y_dim
+#         self.x_dim = x_dim
+#         self.y_dim = y_dim
     
-    def forward(self, x_c, y_c, x, y=None):
-        assert x_c.shape[-1] == self.x_dim
-        assert y_c.shape[-1] == self.y_dim
-        assert x.shape[-1] == self.x_dim
-        if y is not None:
-            assert y.shape[-1] == self.y_dim
+#     def forward(self, x_c, y_c, x, y=None):
+#         assert x_c.shape[-1] == self.x_dim
+#         assert y_c.shape[-1] == self.y_dim
+#         assert x.shape[-1] == self.x_dim
+#         if y is not None:
+#             assert y.shape[-1] == self.y_dim
         
-        L = self.L_asym @ self.L_asym.t()
+#         L = self.L_asym @ self.L_asym.t()
         
-        nobs = x_c.shape[1]
-        if nobs > 0:
-            phi_c = self.backbone(x_c)
+#         nobs = x_c.shape[1]
+#         if nobs > 0:
+#             phi_c = self.backbone(x_c)
             
-            posterior_L_inv = torch.inverse((phi_c.transpose(1, 2) @ phi_c) + L[None,:])
-            posterior_K     = posterior_L_inv @ ((phi_c.transpose(1, 2) @ y_c) + (L @ self.K))
-        else:
-            posterior_L_inv = torch.inverse(L)
-            posterior_K     = self.K # !! According to original code
+#             posterior_L_inv = torch.inverse((phi_c.transpose(1, 2) @ phi_c) + L[None,:])
+#             posterior_K     = posterior_L_inv @ ((phi_c.transpose(1, 2) @ y_c) + (L @ self.K))
+#         else:
+#             posterior_L_inv = torch.inverse(L)
+#             posterior_K     = self.K # !! According to original code
             
         
-        phi = self.backbone(x)
-        mu_pred = phi @ posterior_K
+#         phi = self.backbone(x)
+#         mu_pred = phi @ posterior_K
         
-        spread_fac = 1 + self._batch_quadform1(posterior_L_inv, phi)
+#         spread_fac = 1 + self._batch_quadform1(posterior_L_inv, phi)
         
-        # Expand each element of spread_fac to y_dim diagonal matrix
-        sig_pred = torch.einsum('...i,jk->...ijk', spread_fac, self.sig_eps_eye)
+#         # Expand each element of spread_fac to y_dim diagonal matrix
+#         sig_pred = torch.einsum('...i,jk->...ijk', spread_fac, self.sig_eps_eye)
         
-        predictive_nll = None
-        if y is not None:
-            quadf = self._batch_quadform2(torch.inverse(sig_pred), y - mu_pred)
-            predictive_nll = self._sig_pred_logdet(spread_fac).mean() + quadf.mean()
+#         predictive_nll = None
+#         if y is not None:
+#             quadf = self._batch_quadform2(torch.inverse(sig_pred), y - mu_pred)
+#             predictive_nll = self._sig_pred_logdet(spread_fac).mean() + quadf.mean()
         
-        return mu_pred, sig_pred, predictive_nll
+#         return mu_pred, sig_pred, predictive_nll
     
-    def _batch_quadform1(self, A, b):
-        # Eq 8 helper
-        #   Also equivalent to: ((b @ A) * b).sum(dim=-1)
-        return torch.einsum('...ij,...jk,...ik->...i', b, A, b)
+#     def _batch_quadform1(self, A, b):
+#         # Eq 8 helper
+#         #   Also equivalent to: ((b @ A) * b).sum(dim=-1)
+#         return torch.einsum('...ij,...jk,...ik->...i', b, A, b)
     
-    def _batch_quadform2(self, A, b):
-        # Eq 10 helper
-        return torch.einsum('...i,...ij,...j->...', b, A, b)
+#     def _batch_quadform2(self, A, b):
+#         # Eq 10 helper
+#         return torch.einsum('...i,...ij,...j->...', b, A, b)
     
-    def _sig_pred_logdet(self, spread_fac):
-        # Compute logdet(sig_pred)
-        # Equivalent to [[ss.logdet() for ss in s] for s in sig_pred]
-        return self.y_dim * (spread_fac.log() + self.log_sig_eps)
+#     def _sig_pred_logdet(self, spread_fac):
+#         # Compute logdet(sig_pred)
+#         # Equivalent to [[ss.logdet() for ss in s] for s in sig_pred]
+#         return self.y_dim * (spread_fac.log() + self.log_sig_eps)
 
