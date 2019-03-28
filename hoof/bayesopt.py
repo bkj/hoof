@@ -20,11 +20,11 @@ def gaussian_ei(mu, sig, incumbent=0.0):
     return values
 
 
-def scipy_optimize(fn, p):
+def scipy_minimize(fn, p, bounds=None):
     def _target(x):
-        return float(fn(x.reshape(1, -1)))
+         return float(fn(x.reshape(1, -1)))
         
-    res = minimize(_target, p, bounds=[(0, None)] * p.shape[1])
+    res = minimize(_target, p, bounds=None)
     return res.x, res.fun
 
 

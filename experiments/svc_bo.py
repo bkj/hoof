@@ -6,6 +6,7 @@
 
 import sys
 import numpy as np
+import pandas as pd
 from time import time
 from tqdm import tqdm, trange
 
@@ -17,7 +18,8 @@ from matplotlib import pyplot as plt
 
 from hoof.dataset import FileDataset
 from hoof.models import ALPACA
-from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
+from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
+from hoof.bayesopt import gaussian_ei
 
 torch.set_num_threads(1)
 set_seeds(345)
@@ -43,20 +45,18 @@ train_dataset.task_ids, valid_dataset.task_ids = task_ids[:20], task_ids[20:]
 # --
 # Train
 
-model = ALPACA(x_dim=train_dataset.x_dim, y_dim=1, sig_eps=0.01, hidden_dim=128, final_dim=128, activation='relu')
-model = model.cuda()
+model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='relu').cuda()
 
 train_history = []
-lrs = [1e-4, 1e-5]
+lrs = [1e-4]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 32, "support_size" : 10, "query_size" : 10, "num_batches" : 30000}
+train_kwargs = {"batch_size" : 32, "support_size" : 10, "query_size" : 10, "num_samples" : 30000}
 
 for lr in lrs:
-    for p in opt.param_groups:
-            p['lr'] = lr
+    set_lr(opt, lr)
     
-    train_history  += train(model, opt, train_dataset, **train_kwargs)
+    train_history  += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
@@ -65,40 +65,15 @@ for lr in lrs:
     show_plot()
 
 
-valid_history = valid(model, valid_dataset, **train_kwargs)
+valid_history = model.valid(dataset=valid_dataset, **train_kwargs)
 
 print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
 print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
 
 # --
-# BO helpers
-
-import pandas as pd
-from scipy.stats import norm
-# from scipy.optimize import minimize
-
-def gaussian_ei(mu, sig, incumbent=0.0):
-    """ gaussian_ei for minimizing a function """
-    values       = np.zeros_like(mu)
-    mask         = sig > 0
-    improve      = incumbent - mu[mask]
-    Z            = improve / sig[mask]
-    exploit      = improve * norm.cdf(Z)
-    explore      = sig[mask] * norm.pdf(Z)
-    values[mask] = exploit + explore
-    return values
-
-# def scipy_optimize(fn, x_s):
-#     def _target(x):
-#         return float(fn(x.reshape(1, -1)))
-        
-#     res = minimize(_target, x_s[0], bounds=[(0, None)] * x_s.shape[1])
-#     return _target(res.x)
-
-# --
 # Run BO experiment
 
-umodel = ALPACA(x_dim=train_dataset.x_dim, y_dim=1, sig_eps=0.01, hidden_dim=128, final_dim=128, activation='tanh')
+umodel = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.01, hidden_dim=128, activation='tanh')
 umodel = umodel.cuda()
 
 res = []
