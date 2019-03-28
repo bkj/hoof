@@ -100,44 +100,23 @@ class SinusoidDataset(_BaseDataset):
         return _fn
 
 
-# class SinusoidDataset(_BaseDataset):
-#     def __init__(self, amp_range=[0.1, 5.0], phase_range=[0, 3.14], 
-#         freq_range=[0.999, 1.0], x_range=[-5, 5], sig_eps=0.02, **kwargs):
+class PowerDataset(_BaseDataset):
+    def __init__(self, x_range=[0, 1], **kwargs):
+        self.x_range = x_range
         
-#         self.amp_range   = amp_range
-#         self.phase_range = phase_range
-#         self.freq_range  = freq_range
-#         self.x_range     = x_range
-#         self.noise_std   = np.sqrt(sig_eps)
-        
-#         super().__init__(**kwargs)
+        super().__init__(**kwargs)
     
-#     def _sample_params(self):
-#         amp   = self.rng.uniform(*self.amp_range)
-#         phase = self.rng.uniform(*self.phase_range)
-#         freq  = self.rng.uniform(*self.freq_range)
-#         return amp, phase, freq
+    def sample_x(self, n):
+        return self.rng.uniform(*self.x_range, (n, 1))
     
-#     def sample(self, n_funcs, train_samples, test_samples):
+    def sample_fn(self):
+        c = self.rng.uniform(1, 5)
+        p = self.rng.choice([2, 3, 100])
         
-#         x_c = self.rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
-#         x   = self.rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
+        def _fn(x):
+            return c * x ** p
         
-#         y_c = np.zeros((n_funcs, train_samples, 1))
-#         y   = np.zeros((n_funcs, test_samples, 1))
-        
-#         funcs = []
-#         for i in range(n_funcs):
-            
-#             amp, phase, freq = self._get_params()
-            
-#             _f     = _make_sin_func(amp, phase, freq, self.noise_std)
-#             y_c[i] = _f(x_c[i])
-#             y[i]   = _f(x[i])
-            
-#             funcs.append(copy(_f))
-        
-#         return x_c, y_c, x, y, funcs
+        return _fn
 
 
 # # --

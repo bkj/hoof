@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 """
-    alpaca.py
+    simple_example.py
 """
 
 import sys
@@ -15,7 +15,7 @@ from torch import nn
 from rsub import *
 from matplotlib import pyplot as plt
 
-from hoof.dataset import SinusoidDataset
+from hoof.dataset import SinusoidDataset, PowerDataset
 from hoof.models import ALPACA
 from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
 
@@ -58,8 +58,11 @@ def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, trai
 # --
 # Train
 
-train_dataset = SinusoidDataset(noise_std=0.0)
-valid_dataset = SinusoidDataset(noise_std=0.0)
+# train_dataset = SinusoidDataset(noise_std=0.0)
+# valid_dataset = SinusoidDataset(noise_std=0.0)
+
+train_dataset = PowerDataset()
+valid_dataset = PowerDataset()
 
 model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 model = model.cuda()
@@ -71,14 +74,13 @@ for lr in lrs:
     for p in opt.param_groups:
             p['lr'] = lr
     
-    loss_history += train(model, opt, train_dataset, batch_size=128, train_batches=30000)
+    loss_history += train(model, opt, train_dataset, batch_size=128, support_size=5, query_size=5, train_batches=30000)
     _ = plt.plot(loss_history)
     _ = plt.yscale('log')
     _ = plt.grid()
     show_plot()
 
 print('final_loss=%f' % np.mean(loss_history[-100:]), file=sys.stderr)
-
 
 # --
 # Plot example
