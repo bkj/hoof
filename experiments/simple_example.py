@@ -17,7 +17,7 @@ from matplotlib import pyplot as plt
 
 from hoof import dataset
 from hoof.models import ALPACA, rks_regression
-from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
+from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
 
 torch.set_num_threads(1)
 set_seeds(345)
@@ -45,8 +45,7 @@ opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 10, "num_samples" : 30000}
 
 for lr in lrs:
-    for p in opt.param_groups:
-            p['lr'] = lr
+    set_lr(lr)
     
     train_history += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
     

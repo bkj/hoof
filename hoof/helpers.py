@@ -33,6 +33,10 @@ def tensors2list(xs, squeeze=False):
     else:
         return list(map(lambda x: to_numpy(x).squeeze(), xs))
 
+def set_lr(opt, lr):
+    for p in opt.param_groups:
+        p['lr'] = lr
+
 # --
 # Metrics
 
