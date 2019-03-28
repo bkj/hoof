@@ -5,8 +5,15 @@
 """
 
 import sys
+import json
 import numpy as np
+import pandas as pd
 from copy import copy
+
+import sklearn
+import sklearn.compose
+import sklearn.impute
+import sklearn.feature_selection
 
 # --
 # Base Dataset
@@ -133,7 +140,7 @@ class PowerDataset(_BaseDataset):
 
 
 class QuadraticDataset(_BaseDataset):
-    def __init__(self, x_range=[-1, 1], x_dim=1, **kwargs):
+    def __init__(self, x_range=[0, 2], x_dim=1, **kwargs):
         self.x_range = x_range
         self.x_dim   = x_dim
         
@@ -154,6 +161,82 @@ class QuadraticDataset(_BaseDataset):
         
         return _fn
 
+
+class FileDataset(_BaseDataset):
+    def __init__(self, path, **kwargs):
+        
+        self.data     = self._load_data(path)
+        self.task_ids = list(set(self.data.task_id))
+        
+        self.data_dict = {}
+        for task_id in self.task_ids:
+            sub = self.data[self.data.task_id == task_id]
+            self.data_dict[task_id] = {
+                "x" : np.vstack(sub.Xf.values),
+                "y" : sub.mean_score.values.reshape(-1, 1),
+            }
+        
+        self.x_cols = ['param_cost', 'param_degree', 'param_gamma', 'param_kernel']
+        
+        super().__init__(**kwargs)
+    
+    def _load_data(self, path):
+        data = [json.loads(xx) for xx in open(path).read().splitlines()]
+        data = [{
+            "task_id"             : xx['task_id'],
+            "mean_score"          : np.mean(xx['scores']),
+            "all_scores"          : xx['scores'],
+            "param_rbf_kernel"    : int(xx['params'].get('kernel', None) is None),
+            "param_linear_kernel" : int(xx['params'].get('kernel', None) == 'linear'),
+            "param_poly_kernel"   : int(xx['params'].get('kernel', None) == 'polynomial'),
+            "param_cost"          : xx['params'].get('cost', None),
+            "param_gamma"         : xx['params'].get('gamma', None),
+            "param_degree"        : xx['params'].get('degree', None),
+        } for xx in data]
+        data = pd.DataFrame(data, columns=list(data[0].keys()))
+        
+        # !! Missing value indicator?
+        # nominal_indices = [0, 1, 2]
+        numeric_indices = [3, 4, 5]
+        prep = sklearn.pipeline.make_pipeline(
+            sklearn.compose.ColumnTransformer(
+                transformers=[
+                    ('numeric', sklearn.pipeline.make_pipeline(
+                        sklearn.preprocessing.Imputer(),
+                        sklearn.preprocessing.StandardScaler(),
+                    ), numeric_indices),
+                    # ('nominal', sklearn.pipeline.make_pipeline(
+                    #     sklearn.impute.SimpleImputer(strategy='constant', fill_value=-1),
+                    #     sklearn.preprocessing.OneHotEncoder(handle_unknown='ignore'),
+                    # ), nominal_indices)
+                ],
+                remainder='passthrough',
+            ),
+            sklearn.feature_selection.VarianceThreshold(),
+        )
+        
+        params = data[[c for c in data.columns if 'param_' in c]]
+        Xf = prep.fit_transform(params)
+        
+        self.x_dim = Xf.shape[1]
+        
+        data['Xf'] = [tuple(xx) for xx in Xf]
+        
+        return data
+    
+    def sample_one(self, support_size, query_size):
+        task_id = np.random.choice(self.task_ids)
+        
+        sub = self.data_dict[task_id]
+        
+        sel = np.random.choice(sub['x'].shape[0], support_size + query_size, replace=False)
+        x   = sub['x'][sel]
+        y   = sub['y'][sel]
+        
+        x_support, x_query = x[:support_size], x[support_size:]
+        y_support, y_query = y[:support_size], y[support_size:]
+        
+        return x_support, y_support, x_query, y_query, {"task_id" : task_id}
 
 # # --
 # # Gradient descent on absolute value function
