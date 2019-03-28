@@ -25,7 +25,7 @@ set_seeds(345)
 # --
 # Dataset
 
-dataset_name = 'SinusoidDataset'
+dataset_name = 'NoisySinusoidDataset'
 popsize = None
 
 dataset_cls = getattr(dataset, dataset_name)
@@ -45,7 +45,7 @@ opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 10, "num_samples" : 30000}
 
 for lr in lrs:
-    set_lr(lr)
+    set_lr(opt, lr)
     
     train_history += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
     

@@ -109,6 +109,41 @@ class SinusoidDataset(_BaseDataset):
         return _fn
 
 
+class NoisySinusoidDataset(_BaseDataset):
+    def __init__(self, 
+        amp_range=[0.1, 5.0],
+        phase_range=[0, 3.14], 
+        freq_range=[0.999, 1.0],
+        noise_range=[0.0, 0.5],
+        x_range=[-5, 5],
+        
+        **kwargs
+    ):
+        
+        self.amp_range   = amp_range
+        self.phase_range = phase_range
+        self.freq_range  = freq_range
+        self.x_range     = x_range
+        self.noise_range = noise_range
+        
+        super().__init__(**kwargs)
+    
+    def sample_x(self, n):
+        return self.rng.uniform(*self.x_range, (n, 1))
+    
+    def sample_fn(self):
+        amp   = self.rng.uniform(*self.amp_range)
+        phase = self.rng.uniform(*self.phase_range)
+        freq  = self.rng.uniform(*self.freq_range)
+        noise = self.rng.uniform(*self.noise_range)
+        
+        def _fn(x):
+            tmp = amp * np.sin(freq * x + phase)
+            tmp += np.random.normal(0, noise, tmp.shape)
+            return tmp
+        
+        return _fn
+
 class PowerDataset(_BaseDataset):
     def __init__(self, x_range=[0, 1], **kwargs):
         self.x_range = x_range
