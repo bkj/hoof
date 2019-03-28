@@ -110,11 +110,22 @@ class PowerDataset(_BaseDataset):
         return self.rng.uniform(*self.x_range, (n, 1))
     
     def sample_fn(self):
-        c = self.rng.uniform(1, 5)
-        p = self.rng.choice([2, 3, 100])
+        # >>
+        # Harder
         
+        # c = self.rng.uniform(1, 5)
+        # p = self.rng.choice([2, 3, 100])
+        
+        # def _fn(x):
+        #     return c * x ** p
+        
+        # --
+        # Simpler
+        
+        p = self.rng.uniform(1, 5)
         def _fn(x):
-            return c * x ** p
+            return x ** p
+        # <<
         
         return _fn
 
