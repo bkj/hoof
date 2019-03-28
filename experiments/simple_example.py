@@ -42,7 +42,7 @@ train_history = []
 lrs = [1e-4, 1e-5]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 10, "num_samples" : 30000}
+train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
 for lr in lrs:
     set_lr(opt, lr)
@@ -64,19 +64,26 @@ print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
 # --
 # Plot example
 
-x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
-x_grid = np.linspace(*valid_dataset.x_range, 1000).reshape(-1, 1)
-y_grid = fn(x_grid)
+np.random.seed(456)
+valid_dataset.set_seed(123)
+fig, ax = plt.subplots(3, 3)
 
-inp = list2tensors((x_s, y_s, x_grid), cuda=model.is_cuda)
-mu, sig, _ = model(*inp)
-mu, sig = tensors2list((mu, sig), squeeze=True)
+for i in range(3):
+    for j in range(3):
+        x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
+        x_grid = np.linspace(*valid_dataset.x_range, 1000).reshape(-1, 1)
+        y_grid = fn(x_grid)
+        
+        inp = list2tensors((x_s, y_s, x_grid), cuda=model.is_cuda)
+        mu, sig, _ = model(*inp)
+        mu, sig = tensors2list((mu, sig), squeeze=True)
+        
+        _ = ax[i,j].plot(x_grid, y_grid, c='black', alpha=0.25)
+        _ = ax[i,j].plot(x_grid, mu)
+        # _ = ax[i,j].plot(x_grid, rks_regression(x_s, y_s, x_grid, n_components=50, gamma=0.25), c='orange', alpha=0.75)
+        _ = ax[i,j].fill_between(x_grid.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
+        _ = ax[i,j].scatter(x_s, y_s, c='red')
+        _ = ax[i,j].set_xlim(*valid_dataset.x_range)
 
-_ = plt.scatter(x_s, y_s, c='black')
-_ = plt.plot(x_grid, y_grid, c='black')
-_ = plt.plot(x_grid, mu, alpha=0.75)
-_ = plt.plot(x_grid, rks_regression(x_s, y_s, x_grid, n_components=50, gamma=0.25), c='orange', alpha=0.75)
-_ = plt.fill_between(x_grid.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
-_ = plt.xlim(*valid_dataset.x_range)
 show_plot()
 
