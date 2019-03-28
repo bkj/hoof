@@ -69,11 +69,10 @@ elif dataset == 'power':
     valid_dataset = PowerDataset()
     model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.001, hidden_dim=32, final_dim=32, activation='relu')
 
-
 model = model.cuda()
 
 loss_history = []
-lrs = [1e-3, 1e-4, 1e-5]
+lrs = [1e-3]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 for lr in lrs:
     for p in opt.param_groups:
