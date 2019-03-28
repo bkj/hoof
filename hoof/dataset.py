@@ -186,6 +186,7 @@ class FileDataset(_BaseDataset):
             "task_id"             : xx['task_id'],
             "mean_score"          : np.mean(xx['scores']),
             "all_scores"          : xx['scores'],
+            
             "param_rbf_kernel"    : int(xx['params'].get('kernel', None) is None),
             "param_linear_kernel" : int(xx['params'].get('kernel', None) == 'linear'),
             "param_poly_kernel"   : int(xx['params'].get('kernel', None) == 'polynomial'),
@@ -195,31 +196,42 @@ class FileDataset(_BaseDataset):
         } for xx in data]
         data = pd.DataFrame(data, columns=list(data[0].keys()))
         
-        # !! Missing value indicator?
-        # nominal_indices = [0, 1, 2]
-        numeric_indices = [3, 4, 5]
-        prep = sklearn.pipeline.make_pipeline(
-            sklearn.compose.ColumnTransformer(
-                transformers=[
-                    ('numeric', sklearn.pipeline.make_pipeline(
-                        sklearn.preprocessing.Imputer(),
-                        sklearn.preprocessing.StandardScaler(),
-                    ), numeric_indices),
-                    # ('nominal', sklearn.pipeline.make_pipeline(
-                    #     sklearn.impute.SimpleImputer(strategy='constant', fill_value=-1),
-                    #     sklearn.preprocessing.OneHotEncoder(handle_unknown='ignore'),
-                    # ), nominal_indices)
-                ],
-                remainder='passthrough',
-            ),
-            sklearn.feature_selection.VarianceThreshold(),
-        )
+        for c in ['param_cost', 'param_gamma', 'param_degree']:
+            data[c] = data[c].astype(np.float64)
         
-        params = data[[c for c in data.columns if 'param_' in c]]
-        Xf = prep.fit_transform(params)
+        # >>
+        # # !! Missing value indicator?
+        # # nominal_indices = [0, 1, 2]
+        # numeric_indices = [3, 4, 5]
+        # prep = sklearn.pipeline.make_pipeline(
+        #     sklearn.compose.ColumnTransformer(
+        #         transformers=[
+        #             ('numeric', sklearn.pipeline.make_pipeline(
+        #                 sklearn.preprocessing.Imputer(),
+        #                 sklearn.preprocessing.StandardScaler(),
+        #             ), numeric_indices),
+        #             # ('nominal', sklearn.pipeline.make_pipeline(
+        #             #     sklearn.impute.SimpleImputer(strategy='constant', fill_value=-1),
+        #             #     sklearn.preprocessing.OneHotEncoder(handle_unknown='ignore'),
+        #             # ), nominal_indices)
+        #         ],
+        #         remainder='passthrough',
+        #     ),
+        #     sklearn.feature_selection.VarianceThreshold(),
+        # )
+        
+        # params = data[[c for c in data.columns if 'param_' in c]]
+        # Xf = prep.fit_transform(params)
+        # --
+        print('FileDataset: linear kernel only', file=sys.stderr)
+        data = data[data.param_linear_kernel.astype(bool)]
+        del data['param_gamma']
+        del data['param_degree']
+        Xf = np.log10(data.param_cost.values.reshape(-1, 1))
+        Xf = (Xf - Xf.mean()) / Xf.std()
+        # <<
         
         self.x_dim = Xf.shape[1]
-        
         data['Xf'] = [tuple(xx) for xx in Xf]
         
         return data

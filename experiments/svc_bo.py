@@ -25,12 +25,6 @@ torch.set_num_threads(1)
 set_seeds(345)
 
 # --
-# Helpers
-
-def mse(act, pred):
-    return float(((act - pred) ** 2).mean())
-
-# --
 # Dataset
 
 path = 'data/topk.jl'
@@ -45,13 +39,13 @@ train_dataset.task_ids, valid_dataset.task_ids = task_ids[:20], task_ids[20:]
 # --
 # Train
 
-model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='relu').cuda()
+model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.2, hidden_dim=128, activation='relu').cuda()
 
 train_history = []
-lrs = [1e-4]
+lrs = [1e-4, 1e-5]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 32, "support_size" : 10, "query_size" : 10, "num_samples" : 30000}
+train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
 for lr in lrs:
     set_lr(opt, lr)
@@ -69,6 +63,36 @@ valid_history = model.valid(dataset=valid_dataset, **train_kwargs)
 
 print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
 print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
+
+# --
+# Plot
+
+data_dict = valid_dataset.data_dict
+
+list(data_dict.keys())
+
+task_id = 3492
+support_size = data_dict[task_id]['x'].shape[0]
+# orig_task_ids = valid_dataset.task_ids
+valid_dataset.task_ids = [task_id]
+
+x_all, y_all, _, _, fn = valid_dataset.sample_one(support_size=support_size, query_size=0)
+
+x_all, y_all = x_all[np.argsort(x_all.squeeze())], y_all[np.argsort(x_all.squeeze())]
+
+x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=2, query_size=0)
+
+inp = list2tensors((x_s, y_s, x_all), cuda=model.is_cuda)
+mu, sig, _ = model(*inp)
+mu, sig = tensors2list((mu, sig), squeeze=True)
+
+_ = plt.plot(x_all, y_all, c='black', alpha=0.25)
+_ = plt.plot(x_all, mu)
+_ = plt.fill_between(x_all.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
+_ = plt.scatter(x_s, y_s, c='red')
+# _ = plt.xlim(*valid_dataset.x_range)
+show_plot()
+
 
 # --
 # Run BO experiment
@@ -151,7 +175,7 @@ for _ in range(100):
     # --
     # Random
     
-    rand_sel  = np.random.choice(task_x.shape[0], num_rand_candidates, replace=False)
+    rand_sel  = np.random.choice(task_x.shape[0], num_rand_candidates, replace=True)
     rand_cand = task_x[rand_sel]
     rand_y    = task_y[rand_sel]
     rand_traj = pd.Series(rand_y.squeeze()).cummin().values
