@@ -10,9 +10,16 @@
 
 import sys
 import numpy as np
+from tqdm import trange
+
+from sklearn.kernel_approximation import RBFSampler
+from sklearn.linear_model import LinearRegression
 
 import torch
 from torch import nn
+
+from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
+from hoof.helpers import HoofMetrics as metrics
 
 # --
 # Bayesian Linear Regression
@@ -80,6 +87,55 @@ class BLR(nn.Module):
         return self.output_dim * (spread_fac.log() + self.log_sig_eps)
 
 # --
+# NN Helper
+
+class _TrainMixin:
+    def train(self, opt, dataset, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
+        hist = []
+        gen = trange(num_samples // batch_size)
+        for batch_idx in gen:
+            x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
+                batch_size=batch_size,
+                support_size=support_size, # Could sample this horizon for robustness
+                query_size=query_size,     # Could sample this horizon for robustness
+            )
+            
+            inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
+            
+            opt.zero_grad()
+            mu, sig, loss = self(*inp)
+            loss.backward()
+            opt.step()
+            
+            hist.append(metric_fn(y_query, to_numpy(mu)))
+            
+            if not batch_idx % 10:
+                gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
+            
+        return hist
+    
+    def valid(self, dataset, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
+        hist = []
+        gen = trange(num_samples // batch_size)
+        for batch_idx in gen:
+            x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
+                batch_size=batch_size,
+                support_size=support_size, # Could sample this horizon for robustness
+                query_size=query_size,     # Could sample this horizon for robustness
+            )
+            
+            inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
+            
+            with torch.no_grad():
+                mu, sig, loss = self(*inp)
+            
+            hist.append(metric_fn(y_query, to_numpy(mu)))
+            if not batch_idx % 10:
+                gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
+        
+        return hist
+
+# --
 # ALPACA
 
 def _check_shapes(x_support, y_support, x_query, y_query, input_dim, output_dim):
@@ -95,7 +151,7 @@ def _check_shapes(x_support, y_support, x_query, y_query, input_dim, output_dim)
     
     return x_support, y_support, x_query, y_query
 
-class ALPACA(nn.Module):
+class ALPACA(_TrainMixin, nn.Module):
     def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='tanh', hidden_dim=128):
         super().__init__()
         
@@ -135,3 +191,12 @@ class ALPACA(nn.Module):
         phi_query   = self.backbone(x_query)
         
         return self.blr(phi_support, y_support, phi_query, y_query)
+
+# --
+# Random Kitchen Sinks
+
+def rks_regression(x_s, y_s, x_grid, **kwargs):
+    rbf = RBFSampler(**kwargs)
+    p_s = rbf.fit_transform(x_s)
+    lr  = LinearRegression().fit(p_s, y_s)
+    return lr.predict(rbf.transform(x_grid))

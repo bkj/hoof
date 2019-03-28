@@ -32,3 +32,11 @@ def tensors2list(xs, squeeze=False):
         return list(map(to_numpy, xs))
     else:
         return list(map(lambda x: to_numpy(x).squeeze(), xs))
+
+# --
+# Metrics
+
+class HoofMetrics:
+    @staticmethod
+    def mean_squared_error(y_act, y_pred):
+        return float(((y_act - y_pred) ** 2).mean())

@@ -28,55 +28,6 @@ set_seeds(345)
 def mse(act, pred):
     return float(((act - pred) ** 2).mean())
 
-
-def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, num_batches=100):
-    hist = []
-    gen = trange(num_batches // batch_size)
-    for batch_idx in gen:
-        x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
-            batch_size=batch_size,
-            support_size=support_size, # Could sample this horizon for robustness
-            query_size=query_size,     # Could sample this horizon for robustness
-        )
-        
-        (x_support, y_support, x_query, y_query) = \
-            list2tensors((x_support, y_support, x_query, y_query), cuda=model.is_cuda)
-        
-        opt.zero_grad()
-        mu, sig, loss = model(x_support, y_support, x_query, y_query)
-        loss.backward()
-        opt.step()
-        
-        hist.append(mse(mu, y_query))
-        
-        if not batch_idx % 10:
-            gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
-        
-    return hist
-
-
-def valid(model, dataset, batch_size=10, support_size=5, query_size=5, num_batches=100):
-    hist = []
-    gen = trange(num_batches // batch_size)
-    for batch_idx in gen:
-        x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
-            batch_size=batch_size,
-            support_size=support_size, # Could sample this horizon for robustness
-            query_size=query_size,     # Could sample this horizon for robustness
-        )
-        
-        (x_support, y_support, x_query, y_query) = \
-            list2tensors((x_support, y_support, x_query, y_query), cuda=model.is_cuda)
-        
-        with torch.no_grad():
-            mu, sig, loss = model(x_support, y_support, x_query, y_query)
-        
-        hist.append(mse(mu, y_query))
-        if not batch_idx % 10:
-            gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
-    
-    return hist
-
 # --
 # Dataset
 
