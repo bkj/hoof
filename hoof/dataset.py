@@ -4,6 +4,7 @@
     dataset.py
 """
 
+import sys
 import numpy as np
 from copy import copy
 
@@ -21,6 +22,7 @@ class _BaseDataset:
         
         self.popsize = popsize
         if self.popsize is not None:
+            print('setting population to %d functions' % self.popsize, file=sys.stderr)
             self.fn_pop = [self.sample_fn() for _ in range(self.popsize)]
             
     def set_seed(self, seed):
@@ -126,6 +128,29 @@ class PowerDataset(_BaseDataset):
         def _fn(x):
             return x ** p
         # <<
+        
+        return _fn
+
+
+class QuadraticDataset(_BaseDataset):
+    def __init__(self, x_range=[-1, 1], x_dim=1, **kwargs):
+        self.x_range = x_range
+        self.x_dim   = x_dim
+        
+        super().__init__(**kwargs)
+    
+    def sample_x(self, n):
+        return self.rng.uniform(*self.x_range, (n, self.x_dim))
+    
+    def sample_fn(self):
+        alpha = self.rng.uniform(0.1, 10, 3)
+        def _fn(x):
+            assert len(x.shape) > 1
+            return (
+                0.5 * alpha[0] * (x ** 2).mean(axis=-1, keepdims=True) +
+                alpha[1] * x.mean(axis=-1, keepdims=True) +
+                alpha[2]
+            )
         
         return _fn
 

@@ -19,13 +19,13 @@ class ALPACA(nn.Module):
     def __init__(self, x_dim, y_dim, sig_eps, num=1, activation='tanh', hidden_dim=128, final_dim=128):
         super().__init__()
         
-        self.sig_eps  = sig_eps
+        self.sig_eps  = nn.Parameter(torch.Tensor([sig_eps])) # BKJ: made this trainable
         self.register_buffer('eye', torch.eye(y_dim))
         
         # Seems to work OK even if these are not trainable (these are just the priors, so makes sense)
         self.K      = nn.Parameter(torch.zeros(final_dim, y_dim))
         self.L_asym = nn.Parameter(torch.randn(final_dim, final_dim))
-        self.bias   = nn.Parameter(torch.zeros([1]))
+        self.bias   = nn.Parameter(torch.zeros([1])) # BKJ: added this
         
         torch.nn.init.xavier_uniform_(self.K)
         torch.nn.init.xavier_uniform_(self.L_asym)
@@ -54,44 +54,44 @@ class ALPACA(nn.Module):
     def is_cuda(self):
         return next(self.parameters()).is_cuda
     
-    def forward(self, x_c, y_c, x, y=None):
-        assert x_c.shape[-1] == self.x_dim
-        assert y_c.shape[-1] == self.y_dim
-        assert x.shape[-1] == self.x_dim
-        if y is not None:
-            assert y.shape[-1] == self.y_dim
+    def forward(self, x_support, y_support, x_query, y_query=None):
+        # !! BUG: should be normalizing x_support, y_support, x, and y
+        assert x_support.shape[-1] == self.x_dim
+        assert y_support.shape[-1] == self.y_dim
+        assert x_query.shape[-1] == self.x_dim
+        if y_query is not None:
+            assert y_query.shape[-1] == self.y_dim
         
-        if len(x_c.shape) == 2: x_c = x_c[None,:]
-        if len(y_c.shape) == 2: y_c = y_c[None,:]
-        if len(x.shape) == 2:   x = x[None,:]
+        if len(x_support.shape) == 2: x_support = x_support[None,:]
+        if len(y_support.shape) == 2: y_support = y_support[None,:]
+        if len(x_query.shape) == 2:   x_query = x_query[None,:]
         
         L = torch.mm(self.L_asym, self.L_asym.t())
         
-        phi = self.backbone(x)
-        
-        nobs = x_c.shape[1]
+        nobs = x_support.shape[1]
         if nobs > 0:
-            phi_c = self.backbone(x_c)
+            phi_support = self.backbone(x_support)
             
-            posterior_L_inv = torch.bmm(phi_c.transpose(1, 2), phi_c)
+            posterior_L_inv = torch.bmm(phi_support.transpose(1, 2), phi_support)
             posterior_L_inv = posterior_L_inv + L.unsqueeze(0)
             posterior_L_inv = self.batch_inv(posterior_L_inv)
             
-            posterior_K = torch.bmm(phi_c.transpose(1, 2), y_c) + torch.mm(L, self.K)
+            posterior_K = torch.bmm(phi_support.transpose(1, 2), y_support) + torch.mm(L, self.K)
             posterior_K = torch.bmm(posterior_L_inv, posterior_K)
         else:
             posterior_L_inv = self.batch_inv(L)
             posterior_K     = self.K
         
+        phi     = self.backbone(x_query)
         mu_pred = torch.bmm(phi, posterior_K) + self.bias
         
         spread_fac = 1 + self.batch_quadform(posterior_L_inv, phi)
         sig_pred = spread_fac.unsqueeze(-1) * self.eye.view(1, 1, self.y_dim, self.y_dim) * self.sig_eps
         
         predictive_nll = None
-        if y is not None:
+        if y_query is not None:
             logdet = self.y_dim * spread_fac.log() + (self.eye * self.sig_eps).logdet()
-            quadf  = self.batch_quadform2(self.batch_inv(sig_pred), y - mu_pred)
+            quadf  = self.batch_quadform2(self.batch_inv(sig_pred), y_query - mu_pred)
             predictive_nll = (logdet + quadf).mean()
         
         return mu_pred, sig_pred, predictive_nll
@@ -161,21 +161,21 @@ class ALPACA(nn.Module):
 #         self.x_dim = x_dim
 #         self.y_dim = y_dim
     
-#     def forward(self, x_c, y_c, x, y=None):
-#         assert x_c.shape[-1] == self.x_dim
-#         assert y_c.shape[-1] == self.y_dim
+#     def forward(self, x_support, y_support, x, y=None):
+#         assert x_support.shape[-1] == self.x_dim
+#         assert y_support.shape[-1] == self.y_dim
 #         assert x.shape[-1] == self.x_dim
 #         if y is not None:
 #             assert y.shape[-1] == self.y_dim
         
 #         L = self.L_asym @ self.L_asym.t()
         
-#         nobs = x_c.shape[1]
+#         nobs = x_support.shape[1]
 #         if nobs > 0:
-#             phi_c = self.backbone(x_c)
+#             phi_support = self.backbone(x_support)
             
-#             posterior_L_inv = torch.inverse((phi_c.transpose(1, 2) @ phi_c) + L[None,:])
-#             posterior_K     = posterior_L_inv @ ((phi_c.transpose(1, 2) @ y_c) + (L @ self.K))
+#             posterior_L_inv = torch.inverse((phi_support.transpose(1, 2) @ phi_support) + L[None,:])
+#             posterior_K     = posterior_L_inv @ ((phi_support.transpose(1, 2) @ y_support) + (L @ self.K))
 #         else:
 #             posterior_L_inv = torch.inverse(L)
 #             posterior_K     = self.K # !! According to original code

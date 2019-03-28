@@ -15,7 +15,7 @@ from torch import nn
 from rsub import *
 from matplotlib import pyplot as plt
 
-from hoof.dataset import SinusoidDataset, PowerDataset
+from hoof.dataset import SinusoidDataset, PowerDataset, QuadraticDataset
 from hoof.models import ALPACA
 from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
 
@@ -29,9 +29,9 @@ def mse(act, pred):
     return float(((act - pred) ** 2).mean())
 
 
-def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, train_batches=100):
-    loss_history = []
-    gen = trange(train_batches // batch_size)
+def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, num_batches=100):
+    hist = []
+    gen = trange(num_batches // batch_size)
     for batch_idx in gen:
         x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
             batch_size=batch_size,
@@ -47,50 +47,90 @@ def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, trai
         loss.backward()
         opt.step()
         
-        loss_history.append(mse(mu, y_query))
+        hist.append(mse(mu, y_query))
         
         if not batch_idx % 10:
-            gen.set_postfix(loss='%0.8f' % np.mean(loss_history[-10:]))
+            gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
         
-    return loss_history
+    return hist
 
+
+def valid(model, dataset, batch_size=10, support_size=5, query_size=5, num_batches=100):
+    hist = []
+    gen = trange(num_batches // batch_size)
+    for batch_idx in gen:
+        x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
+            batch_size=batch_size,
+            support_size=support_size, # Could sample this horizon for robustness
+            query_size=query_size,     # Could sample this horizon for robustness
+        )
+        
+        (x_support, y_support, x_query, y_query) = \
+            list2tensors((x_support, y_support, x_query, y_query), cuda=model.is_cuda)
+        
+        with torch.no_grad():
+            mu, sig, loss = model(x_support, y_support, x_query, y_query)
+        
+        hist.append(mse(mu, y_query))
+        if not batch_idx % 10:
+            gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
+    
+    return hist
+
+# --
+# Dataset
+
+dataset = 'quadratic'
+popsize = None
+
+# datasets = {
+#     "sinusoid"  : SinusoidDataset,
+#     "power"     : PowerDataset,
+#     "quadratic" : QuadraticDataset,
+# }
+
+# dataset_cls = datasets[dataset]
+
+# train_dataset = dataset_cls(popsize=popsize)
+# valid_dataset = dataset_cls()
+
+train_dataset = QuadraticDataset(x_dim=3, popsize=popsize)
+valid_dataset = QuadraticDataset(x_dim=3)
 
 # --
 # Train
 
-dataset = 'sinusoid'
-
-if dataset == 'sinusoid':
-    train_dataset = SinusoidDataset(noise_std=0.0)
-    valid_dataset = SinusoidDataset(noise_std=0.0)
-elif dataset == 'power':
-    train_dataset = PowerDataset()
-    valid_dataset = PowerDataset()
-
-
-model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.01, hidden_dim=128, final_dim=128, activation='tanh')
+model = ALPACA(x_dim=3, y_dim=1, sig_eps=0.01, hidden_dim=128, final_dim=128, activation='tanh')
 model = model.cuda()
 
-loss_history = []
-lrs = [1e-3, 1e-4, 1e-5]
+train_history = []
+lrs = [1e-4, 1e-5]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
+
+train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 10, "num_batches" : 30000}
+
 for lr in lrs:
     for p in opt.param_groups:
             p['lr'] = lr
     
-    loss_history += train(model, opt, train_dataset, batch_size=128, support_size=5, query_size=5, train_batches=30000)
-    _ = plt.plot(loss_history)
+    train_history  += train(model, opt, train_dataset, **train_kwargs)
+    
+    _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
     _ = plt.grid()
+    _ = plt.legend()
     show_plot()
 
-print('final_loss=%f' % np.mean(loss_history[-100:]), file=sys.stderr)
+
+valid_history = valid(model, valid_dataset, **train_kwargs)
+
+print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
+print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
 
 # --
 # Plot example
 
-x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
-
+x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=10, query_size=0)
 x_grid = np.linspace(*valid_dataset.x_range, 1000)
 y_grid = fn(x_grid)
 
