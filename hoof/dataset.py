@@ -70,7 +70,7 @@ class SinusoidDataset(_BaseDataset):
         phase_range=[0, 3.14], 
         freq_range=[0.999, 1.0],
         x_range=[-5, 5],
-        noise_std=0.02,
+        noise_std=0.0,
         **kwargs
     ):
         

@@ -4,6 +4,7 @@
     alpaca.py
 """
 
+import sys
 import numpy as np
 from time import time
 from tqdm import tqdm, trange
@@ -16,28 +17,16 @@ from matplotlib import pyplot as plt
 
 from hoof.dataset import SinusoidDataset
 from hoof.models import ALPACA
-from hoof.helpers import set_seeds, to_numpy
+from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list
 
 torch.set_num_threads(1)
-set_seeds(123)
+set_seeds(345)
 
 # --
 # Helpers
 
 def mse(act, pred):
     return float(((act - pred) ** 2).mean())
-
-def list2tensors(xs, cuda=False):
-    if not cuda:
-        return list(map(torch.Tensor, xs))
-    else:
-        return list(map(lambda x: torch.Tensor(x).cuda(), xs))
-
-def tensors2list(xs, squeeze=False):
-    if not squeeze:
-        return list(map(to_numpy, xs))
-    else:
-        return list(map(lambda x: to_numpy(x).squeeze(), xs))
 
 
 def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, train_batches=100):
@@ -72,7 +61,7 @@ def train(model, opt, dataset, batch_size=10, support_size=5, query_size=5, trai
 train_dataset = SinusoidDataset(noise_std=0.0)
 valid_dataset = SinusoidDataset(noise_std=0.0)
 
-model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.01) # fixed sig_eps is sortof cheating
+model = ALPACA(x_dim=1, y_dim=1, sig_eps=0.02) # fixed sig_eps is sortof cheating
 model = model.cuda()
 
 loss_history = []
@@ -89,6 +78,7 @@ for lr in lrs:
     show_plot()
 
 print('final_loss=%f' % np.mean(loss_history[-100:]), file=sys.stderr)
+
 
 # --
 # Plot example
