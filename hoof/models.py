@@ -90,7 +90,7 @@ class BLR(nn.Module):
 # NN Helper
 
 class _TrainMixin:
-    def _run_epoch(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
+    def _run_loop(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
         hist = []
         gen = trange(num_samples // batch_size)
         for batch_idx in gen:
@@ -119,11 +119,11 @@ class _TrainMixin:
         return hist
     
     def train(self, dataset, opt, **kwargs):
-        return self._run_epoch(dataset, opt, **kwargs)
+        return self._run_loop(dataset, opt, **kwargs)
     
     def valid(self, dataset, opt=None, **kwargs):
         assert opt is None
-        return self._run_epoch(dataset, opt=None, **kwargs)
+        return self._run_loop(dataset, opt=None, **kwargs)
 
 # --
 # ALPACA
