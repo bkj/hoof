@@ -28,11 +28,12 @@ set_seeds(345)
 # Dataset
 
 dataset_name = 'QuadraticDataset'
-popsize = 30
+popsize = None
 
+x_dim = 3
 dataset_cls   = getattr(dataset, dataset_name)
-train_dataset = dataset_cls(popsize=popsize, x_dim=3, x_range=[-3, 3])
-valid_dataset = dataset_cls(x_dim=3, x_range=[-3, 3])
+train_dataset = dataset_cls(popsize=popsize, x_dim=x_dim, x_range=[-3, 3])
+valid_dataset = dataset_cls(x_dim=x_dim, x_range=[-3, 3])
 
 # >>
 # Plot draws from dataset
@@ -49,13 +50,13 @@ valid_dataset = dataset_cls(x_dim=3, x_range=[-3, 3])
 # --
 # Train
 
-model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='relu').cuda()
+model = ALPACA(input_dim=x_dim, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='relu').cuda()
 
 train_history = []
-lrs = [1e-4, 1e-4, 1e-5]
+lrs = [1e-4, 1e-5]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 30, "support_size" : 10, "query_size" : 1000, "num_samples" : 30000}
+train_kwargs = {"batch_size" : 30, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
 for lr in lrs:
     set_lr(opt, lr)
@@ -93,10 +94,12 @@ if valid_dataset.x_dim == 1:
     _ = plt.xlim(*valid_dataset.x_range)
     show_plot()
 
+print('ok')
+
 # --
 # Run BO experiment
 
-def do_bayesopt(model, fn, dataset, num_samples=20, num_burnin=10, num_candidates_per_round=100000):
+def do_bayesopt(model, fn, dataset, num_samples=20, num_burnin=10, num_candidates_per_round=10_000):
     # !! What's the best way to maximize the surrogate function?
     
     x = dataset.sample_x(n=num_burnin)
