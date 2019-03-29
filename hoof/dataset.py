@@ -144,6 +144,23 @@ class NoisySinusoidDataset(_BaseDataset):
         
         return _fn
 
+
+class LineDataset(_BaseDataset):
+    def __init__(self, x_range=[0, 1], **kwargs):
+        self.x_range = x_range
+        
+        super().__init__(**kwargs)
+    
+    def sample_x(self, n):
+        return self.rng.uniform(*self.x_range, (n, 1))
+    
+    def sample_fn(self):
+        def _fn(x):
+            return x
+        
+        return _fn
+
+
 class PowerDataset(_BaseDataset):
     def __init__(self, x_range=[0, 1], **kwargs):
         self.x_range = x_range
@@ -175,7 +192,7 @@ class PowerDataset(_BaseDataset):
 
 
 class QuadraticDataset(_BaseDataset):
-    def __init__(self, x_range=[0, 2], x_dim=1, **kwargs):
+    def __init__(self, x_range=[-2, 2], x_dim=1, **kwargs):
         self.x_range = x_range
         self.x_dim   = x_dim
         

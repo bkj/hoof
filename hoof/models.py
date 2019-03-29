@@ -50,13 +50,13 @@ class BLR(nn.Module):
         L = self.L_asym @ self.L_asym.t()
         
         nobs = phi_support.shape[1]
-        if nobs > 0:
+        if (nobs > 0):
             posterior_L     = (phi_support.transpose(1, 2) @ phi_support) + L[None,:]
             posterior_L_inv = torch.inverse(posterior_L)
             posterior_K     = posterior_L_inv @ ((phi_support.transpose(1, 2) @ y_support) + (L @ self.K))
         else:
-            posterior_L_inv = torch.inverse(L)
-            posterior_K     = self.K # !! According to original code
+            posterior_L_inv = torch.inverse(L[None,:]).repeat(phi_query.shape[0], 1, 1)
+            posterior_K     = self.K[None,:]
         
         mu_pred = phi_query @ posterior_K + self.bias
         
@@ -75,6 +75,7 @@ class BLR(nn.Module):
     def _batch_quadform1(self, A, b):
         # Eq 8 helper
         #   Also equivalent to: ((b @ A) * b).sum(dim=-1)
+        
         return torch.einsum('...ij,...jk,...ik->...i', b, A, b)
     
     def _batch_quadform2(self, A, b):

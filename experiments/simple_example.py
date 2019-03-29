@@ -25,7 +25,7 @@ set_seeds(345)
 # --
 # Dataset
 
-dataset_name = 'NoisySinusoidDataset'
+dataset_name = 'SinusoidDataset'
 popsize = None
 
 dataset_cls = getattr(dataset, dataset_name)
@@ -33,16 +33,34 @@ dataset_cls = getattr(dataset, dataset_name)
 train_dataset = dataset_cls(popsize=popsize)
 valid_dataset = dataset_cls()
 
+# Plot some examples
+# x_s, y_s, _, _, _ = valid_dataset.sample_one(support_size=100, query_size=0)
+# _ = plt.scatter(x_s.squeeze(), y_s.squeeze())
+# show_plot()
+
+# Compute prior manually
+# y_grids = []
+# for _ in range(1000):
+#     _, _, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
+#     x_grid = np.linspace(*valid_dataset.x_range, 1000).reshape(-1, 1)
+#     y_grid = fn(x_grid)
+#     y_grids.append(y_grid)
+
+# y_prior = np.stack(y_grids).mean(axis=0)
+# _ = plt.plot(y_prior.squeeze())
+# show_plot()
+
 # --
 # Train
 
-model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.01, hidden_dim=128, activation='tanh').cuda()
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='tanh').cuda()
+model.blr.sample_horizon = True
 
 train_history = []
 lrs = [1e-4, 1e-5]
 opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 128, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
+train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
 for lr in lrs:
     set_lr(opt, lr)
@@ -80,6 +98,7 @@ for i in range(3):
         
         _ = ax[i,j].plot(x_grid, y_grid, c='black', alpha=0.25)
         _ = ax[i,j].plot(x_grid, mu)
+        _ = ax[i,j].plot(x_grid, y_prior.squeeze())
         # _ = ax[i,j].plot(x_grid, rks_regression(x_s, y_s, x_grid, n_components=50, gamma=0.25), c='orange', alpha=0.75)
         _ = ax[i,j].fill_between(x_grid.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
         _ = ax[i,j].scatter(x_s, y_s, c='red')
