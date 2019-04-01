@@ -145,6 +145,23 @@ class NoisySinusoidDataset(_BaseDataset):
         return _fn
 
 
+class SmileFrownDataset(_BaseDataset):
+    def __init__(self, x_range=[-3, 3], **kwargs):
+        self.x_range = x_range
+        
+        super().__init__(**kwargs)
+    
+    def sample_x(self, n):
+        return self.rng.uniform(*self.x_range, (n, 1))
+    
+    def sample_fn(self):
+        c = np.random.choice((-1, 1))
+        def _fn(x):
+            return c * (x ** 2) - c
+        
+        return _fn
+
+
 class LineDataset(_BaseDataset):
     def __init__(self, x_range=[0, 1], **kwargs):
         self.x_range = x_range
