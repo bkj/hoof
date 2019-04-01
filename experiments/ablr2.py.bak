@@ -1,0 +1,323 @@
+#!/usr/bin/env python
+
+"""
+    ablr2.py
+"""
+
+from rsub import *
+from matplotlib import pyplot as plt
+
+import numpy as np
+
+import torch
+from torch import nn
+
+from hoof import dataset
+from hoof.helpers import set_seeds, to_numpy
+from hoof.helpers import HoofMetrics as metrics
+
+torch.set_default_tensor_type('torch.DoubleTensor')
+torch.set_num_threads(1)
+set_seeds(123)
+
+from hoof.models import ALPACA
+from hoof.models import BLR as OBLR
+
+# --
+# Helpers
+
+class Encoder(nn.Module):
+    """ NN for learning projection """
+    def __init__(self, input_dim=1, output_dim=1, hidden_dim=64):
+        super().__init__()
+        self._encoder = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+            nn.Linear(hidden_dim, hidden_dim),
+            nn.Tanh(),
+        )
+    
+    def forward(self, x):
+        return self._encoder(x)
+
+
+def compute_blr_nll(phi, y, alpha, beta):
+    n       = phi.shape[0]
+    sigma_t = (1 / alpha) * (phi @ phi.t()) + (1 / beta) * torch.eye(n)
+    nll     = 0.5 * (sigma_t.logdet() + y.t() @ torch.inverse(sigma_t) @ y).squeeze()
+    return nll / n
+
+# >>
+
+
+
+
+# <<
+
+
+
+
+
+# def compute_blr_nll(blr, phi, y, alpha, beta):
+#     n = phi.shape[0]
+#     d = phi.shape[1]
+    
+#     mll = d / 2 * alpha.log()
+#     mll += n / 2 * beta.log()
+#     mll -= n / 2 * np.log(2 * np.pi)
+#     mll -= beta / 2 * (y - (phi @ blr.m)).pow(2).sum().sqrt()
+#     mll -= alpha / 2 * (blr.m.t() @ blr.m).squeeze()
+#     mll -= 0.5 * blr.s_inv.logdet()
+    
+#     return - mll
+
+class BLR:
+    """ Bayesian linear regression """
+    def __init__(self, alpha, beta):
+        self.alpha = alpha
+        self.beta  = beta
+        
+        self.s_inv = None
+        self.s     = None
+        self.m     = None
+    
+    def fit(self, phi, y):
+        """ follows equation 3.53 and 3.54 in Bishop 2006 (PRML) """
+        d = phi.shape[1]
+        
+        self.s_inv = self.alpha * torch.eye(d) + self.beta * (phi.t() @ phi)
+        self.s     = torch.inverse(self.s_inv)        # posterior_L_inv
+        self.m     = self.beta * self.s @ phi.t() @ y # posterior_K
+        return self
+    
+    def predict(self, phi):
+        """ follows equation 3.58 and 3.59 in Bishop 2006 (PRML) """
+        mu    = phi @ self.m
+        sig   = 1 / self.beta + ((phi @ self.s) * phi).sum(dim=-1)
+        return mu, sig
+    
+    def score(self, phi, y):
+        _ =  self.fit(phi, y)
+        mu, sig = self.predict(phi)
+        return metrics.mean_squared_error(y, mu)
+
+
+
+# --
+# Make dataset
+
+num_problems = 30
+
+dataset_name  = 'SinusoidDataset'
+dataset_cls   = getattr(dataset, dataset_name)
+train_dataset = dataset_cls()
+valid_dataset = dataset_cls()
+
+def make_dataset(dataset, num_problems):
+    problems, fns = [], []
+    for _ in range(num_problems):
+        x_s, y_s, _, _, fn = dataset.sample_one(support_size=10, query_size=0)
+        problems.append([
+            torch.Tensor(x_s),
+            torch.Tensor(y_s)
+        ])
+        fns.append(fn)
+    
+    return problems, fns
+
+train_problems, train_fns = make_dataset(train_dataset, num_problems)
+valid_problems, valid_fns = make_dataset(valid_dataset, 10 * num_problems)
+
+# >>
+# ALPACA
+
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.01, hidden_dim=64, activation='tanh').cuda()
+
+train_history = []
+opt = torch.optim.Adam(model.parameters(), lr=1e-4)
+
+train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
+
+train_history += model.train(dataset=train_problems, opt=opt, **train_kwargs)
+
+np.mean(model.valid(dataset=valid_problems))
+
+_ = plt.plot(train_history, c='red', label='train')
+_ = plt.yscale('log')
+_ = plt.grid()
+_ = plt.legend()
+show_plot()
+
+# --
+
+X, y = train_problems[1]
+phi  = model.backbone(X.cuda()).cpu()
+
+alpha = torch.Tensor([1])
+beta  = torch.Tensor([1])
+
+blr = BLR(alpha=alpha, beta=beta)
+blr = blr.fit(phi, y)
+mu, sig = blr.predict(phi)
+metrics.mean_squared_error(y.squeeze(), mu.squeeze())
+
+blr.s_inv
+
+oblr = OBLR(sig_eps=0.1, input_dim=phi.shape[1], output_dim=1)
+omu, osig, onll = oblr(phi[None,...], y[None,...], phi[None,...], y[None,...])
+metrics.mean_squared_error(y.squeeze(), omu.squeeze())
+
+posterior_L     = oblr.alpha * oblr.eye + (phi.t() @ phi)# + L[None,:]
+torch.allclose(blr.s_inv, posterior_L)
+
+posterior_L_inv = torch.inverse(posterior_L)
+torch.allclose(blr.s, posterior_L_inv)
+
+posterior_K     = posterior_L_inv @ ((phi.t() @ y))# + (L @ self.K))
+torch.allclose(blr.m, posterior_K)
+
+mu_pred = phi @ posterior_K# + self.bias
+torch.allclose(mu, mu_pred)
+
+spread_fac = 1 + oblr._batch_quadform1(posterior_L_inv, phi)
+oblr._sig_pred_logdet(spread_fac).sum()
+
+
+
+
+sig_pred   = torch.einsum('...i,jk->...ijk', spread_fac, oblr.sig_eps_eye)
+torch.allclose(sig, sig_pred.squeeze())
+
+onll
+compute_blr_nll(phi, y, 1, 0.8)
+
+p = [1, 1]
+def _fn(p):
+    return float((compute_blr_nll(phi, y, p[0], p[1]) / 2 - onll) ** 2)
+
+from scipy.optimize import minimize
+minimize(_fn, p)
+
+# <<
+
+# --
+# Setup model
+
+encoder     = Encoder()
+log_alphas  = nn.Parameter(torch.zeros(num_problems)) # prior weight
+log_betas   = nn.Parameter(torch.zeros(num_problems)) # noise variance
+
+params = list(encoder.parameters()) + [log_alphas, log_betas]
+opt    = torch.optim.LBFGS(params, max_iter=100)
+
+# --
+# Train
+
+def _target_fn():
+    opt.zero_grad()
+    
+    total_nll, total_mse = 0, 0
+    for idx, (X, y) in enumerate(train_problems):
+        # alpha, beta = log_alphas[idx].exp(), log_betas[idx].exp()
+        
+        phi = encoder(X)
+        
+        # >>
+        # alpha = torch.Tensor([1])
+        # beta  = torch.Tensor([1])
+        
+        # blr = BLR(alpha=alpha, beta=beta)
+        # blr = blr.fit(phi, y)
+        # nll = compute_blr_nll(phi, y, alpha, beta)
+        
+        # mu, sig = blr.predict(phi)
+        # --
+        blr = OBLR(sig_eps=0.01, input_dim=phi.shape[1], output_dim=1)
+        mu, sig, nll = blr(phi[None,...], y[None,...], phi[None,...], y[None,...])
+        mu, sig = mu.squeeze(dim=0), sig.squeeze(dim=0)
+        # <<
+        
+        total_nll += nll
+        total_mse += metrics.mean_squared_error(y.squeeze(), mu.squeeze())
+    
+    total_nll /= len(train_problems)
+    total_nll.backward()
+    
+    total_mse /= len(train_problems)
+    
+    print(float(total_mse), float(total_nll))
+    
+    return float(total_nll)
+
+_ = opt.step(_target_fn)
+
+total_mse = 0
+for X, y in train_problems:
+    phi  = encoder(X)
+    
+    alpha = torch.Tensor([1])
+    beta  = torch.Tensor([1])
+    
+    blr = BLR(alpha=alpha, beta=beta)
+    blr = blr.fit(phi, y)
+    mu, sig = blr.predict(phi)
+    total_mse += metrics.mean_squared_error(y.squeeze(), mu.squeeze())
+
+total_mse /= len(train_problems)
+total_mse
+
+# --
+# Test (on training data)
+
+mean_score = 0
+for idx in range(len(alphas)):
+    alpha, beta = alphas[idx], betas[idx]
+    X, y = train_problems[idx]
+    
+    phi = encoder(X)
+    
+    score = BLR(alpha=alpha, beta=beta).score(phi, y)
+    print(score)
+    mean_score += score
+
+mean_score /= num_problems
+print('mean_score=%f' % mean_score)
+
+# --
+# Test (on validation data)
+
+i = 2
+
+X, y = valid_problems[i]
+fn   = valid_fns[i]
+
+valid_alpha = torch.Tensor([10]).requires_grad_()
+valid_beta  = torch.Tensor([10]).requires_grad_()
+
+opt2 = torch.optim.LBFGS([valid_alpha, valid_beta], lr=1, max_iter=20)
+def _target_fn2():
+    opt.zero_grad()
+    phi = encoder(X)
+    nll = compute_blr_nll(phi, y, valid_alpha, valid_beta)
+    nll.backward()
+    return float(nll)
+
+opt2.step(_target_fn2)
+
+phi   = encoder(X)
+blr = BLR(alpha=valid_alpha, beta=valid_beta).fit(phi, y)
+
+X_grid   = torch.linspace(*train_dataset.x_range, 100).view(-1, 1)
+y_grid   = fn(X_grid)
+
+phi_grid = encoder(X_grid)
+mu_grid, sig_grid = blr.predict(phi_grid)
+
+_ = plt.scatter(to_numpy(X).squeeze(), to_numpy(y).squeeze(), c='black')
+_ = plt.plot(to_numpy(X_grid).squeeze(), to_numpy(y_grid).squeeze(), c='black', alpha=0.5)
+_ = plt.plot(to_numpy(X_grid).squeeze(), to_numpy(mu_grid).squeeze(), c='red')
+show_plot()
+
+

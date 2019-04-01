@@ -19,42 +19,39 @@ from hoof import dataset
 from hoof.models import ALPACA, rks_regression
 from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
 
+torch.set_default_tensor_type('torch.DoubleTensor')
 torch.set_num_threads(1)
-set_seeds(345)
+set_seed(123)
 
 # --
 # Dataset
 
-dataset_name = 'SinusoidDataset'
-popsize = None
+num_problems = 30
 
-dataset_cls = getattr(dataset, dataset_name)
-
-train_dataset = dataset_cls(popsize=popsize)
+dataset_name  = 'SinusoidDataset'
+dataset_cls   = getattr(dataset, dataset_name)
+train_dataset = dataset_cls()
 valid_dataset = dataset_cls()
 
-# Plot some examples
-# x_s, y_s, _, _, _ = valid_dataset.sample_one(support_size=100, query_size=0)
-# _ = plt.scatter(x_s.squeeze(), y_s.squeeze())
-# show_plot()
+def make_dataset(dataset, num_problems):
+    problems, fns = [], []
+    for _ in range(num_problems):
+        x_s, y_s, _, _, fn = dataset.sample_one(support_size=10, query_size=0)
+        problems.append([
+            torch.Tensor(x_s),
+            torch.Tensor(y_s),
+        ])
+        fns.append(fn)
+    
+    return problems, fns
 
-# Compute prior manually
-# y_grids = []
-# for _ in range(1000):
-#     _, _, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
-#     x_grid = np.linspace(*valid_dataset.x_range, 1000).reshape(-1, 1)
-#     y_grid = fn(x_grid)
-#     y_grids.append(y_grid)
-
-# y_prior = np.stack(y_grids).mean(axis=0)
-# _ = plt.plot(y_prior.squeeze())
-# show_plot()
+train_problems, train_fns = make_dataset(train_dataset, num_problems)
+valid_problems, valid_fns = make_dataset(valid_dataset, 10 * num_problems)
 
 # --
 # Train
 
-model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='tanh').cuda()
-model.blr.sample_horizon = True
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.01, hidden_dim=128, activation='tanh').cuda()
 
 train_history = []
 lrs = [1e-4, 1e-5]
@@ -65,7 +62,7 @@ train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num
 for lr in lrs:
     set_lr(opt, lr)
     
-    train_history += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
+    train_history += model.train(dataset=train_problems, opt=opt, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')

@@ -33,32 +33,42 @@ class BLR(nn.Module):
         # !! Is the bias a good idea?
         
         self.sig_eps     = sig_eps
-        self.log_sig_eps = np.log(sig_eps)
+        self.log_sig_eps = sig_eps.log()
         self.register_buffer('sig_eps_eye', torch.eye(output_dim) * self.sig_eps)
         
-        self.K      = nn.Parameter(torch.zeros(input_dim, output_dim))
-        self.L_asym = nn.Parameter(torch.randn(input_dim, input_dim))
-        self.bias   = nn.Parameter(torch.zeros([1]))
+        self.alpha = 1
+        self.register_buffer('eye', torch.eye(input_dim))
         
-        torch.nn.init.xavier_uniform_(self.K)
-        torch.nn.init.xavier_uniform_(self.L_asym)
+        # >>
+        # self.K      = nn.Parameter(torch.zeros(input_dim, output_dim))
+        # self.L_asym = nn.Parameter(torch.randn(input_dim, input_dim))
+        # self.bias   = nn.Parameter(torch.zeros([1]))
+        # --
+        # self.register_buffer('K', torch.zeros(input_dim, output_dim))
+        # self.register_buffer('L_asym', torch.zeros(input_dim, input_dim))
+        # self.register_buffer('bias', torch.zeros([1]))
+        # <<
+        
+        # torch.nn.init.xavier_uniform_(self.K)
+        # torch.nn.init.xavier_uniform_(self.L_asym)
         
         self.input_dim  = input_dim
         self.output_dim = output_dim
     
     def forward(self, phi_support, y_support, phi_query, y_query=None):
-        L = self.L_asym @ self.L_asym.t()
+        # L = self.L_asym @ self.L_asym.t()
         
         nobs = phi_support.shape[1]
         if (nobs > 0):
-            posterior_L     = (phi_support.transpose(1, 2) @ phi_support) + L[None,:]
+            posterior_L     = self.alpha * self.eye + (phi_support.transpose(1, 2) @ phi_support)# + L[None,:]
             posterior_L_inv = torch.inverse(posterior_L)
-            posterior_K     = posterior_L_inv @ ((phi_support.transpose(1, 2) @ y_support) + (L @ self.K))
+            posterior_K     = posterior_L_inv @ ((phi_support.transpose(1, 2) @ y_support))# + (L @ self.K))
         else:
-            posterior_L_inv = torch.inverse(L[None,:]).repeat(phi_query.shape[0], 1, 1)
-            posterior_K     = self.K[None,:]
+            raise Exception
+            # posterior_L_inv = torch.inverse(L[None,:]).repeat(phi_query.shape[0], 1, 1)
+            # posterior_K     = self.K[None,:]
         
-        mu_pred = phi_query @ posterior_K + self.bias
+        mu_pred = phi_query @ posterior_K# + self.bias
         
         spread_fac = 1 + self._batch_quadform1(posterior_L_inv, phi_query)
         
@@ -95,11 +105,26 @@ class _TrainMixin:
         hist = []
         gen = trange(num_samples // batch_size)
         for batch_idx in gen:
-            x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
-                batch_size=batch_size,
-                support_size=support_size, # Could sample this horizon for robustness
-                query_size=query_size,     # Could sample this horizon for robustness
-            )
+            # >>
+            if isinstance(dataset, list):
+                x_support, y_support = [], []
+                for idx in np.random.choice(len(dataset), batch_size):
+                    x_s, y_s = dataset[idx]
+                    x_support.append(x_s)
+                    y_support.append(y_s)
+                    
+                x_support = np.stack(x_support)
+                y_support = np.stack(y_support)
+                x_query   = np.stack(x_support) # !!
+                y_query   = np.stack(y_support) # !!
+            else:
+                raise Exception
+                # x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
+                #     batch_size=batch_size,
+                #     support_size=support_size, # Could sample this horizon for robustness
+                #     query_size=query_size,     # Could sample this horizon for robustness
+                # )
+            # <<
             
             inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
             
@@ -141,6 +166,7 @@ def _check_shapes(x_support, y_support, x_query, y_query, input_dim, output_dim)
     if len(x_query.shape) == 2:   x_query = x_query[None,:]
     
     return x_support, y_support, x_query, y_query
+
 
 class ALPACA(_TrainMixin, nn.Module):
     def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='tanh', hidden_dim=128):
