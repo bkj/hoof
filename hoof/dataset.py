@@ -231,7 +231,7 @@ class QuadraticDataset(_BaseDataset):
         return _fn
 
 
-class FileDataset(_BaseDataset):
+class SVCFileDataset(_BaseDataset):
     def __init__(self, path, **kwargs):
         
         self.data     = self._load_data(path)
