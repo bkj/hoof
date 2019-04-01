@@ -119,11 +119,13 @@ class _TrainMixin:
             
         return hist
     
-    def train(self, dataset, opt, **kwargs):
+    def do_train(self, dataset, opt, **kwargs):
+        _ = self.train()
         return self._run_loop(dataset, opt, **kwargs)
     
-    def valid(self, dataset, opt=None, **kwargs):
+    def do_valid(self, dataset, opt=None, **kwargs):
         assert opt is None
+        _ = self.eval()
         return self._run_loop(dataset, opt=None, **kwargs)
 
 # --
@@ -142,6 +144,20 @@ def _check_shapes(x_support, y_support, x_query, y_query, input_dim, output_dim)
     
     return x_support, y_support, x_query, y_query
 
+
+class BN(nn.Module):
+    def __init__(self, dim):
+        super().__init__()
+        self.bn = nn.BatchNorm1d(dim)
+    
+    def forward(self, x):
+        bs, obs, d = x.shape
+        x = x.view(bs * obs, d)
+        x = self.bn(x)
+        x = x.view(bs, obs, d)
+        return x
+
+
 class ALPACA(_TrainMixin, nn.Module):
     def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='tanh', hidden_dim=128):
         super().__init__()
@@ -156,10 +172,12 @@ class ALPACA(_TrainMixin, nn.Module):
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             _act(),
+            BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             _act(),
+            BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
-            _act() # Do we want this?
+            _act(), # Do we want this?
         )
         
         self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, output_dim=output_dim)

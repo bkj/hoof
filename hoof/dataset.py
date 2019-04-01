@@ -240,10 +240,25 @@ class SVCFileDataset(_BaseDataset):
         self.data_dict = {}
         for task_id in self.task_ids:
             sub = self.data[self.data.task_id == task_id]
-            self.data_dict[task_id] = {
-                "x" : np.vstack(sub.Xf.values),
-                "y" : sub.mean_score.values.reshape(-1, 1),
-            }
+            
+            X = np.vstack(sub.Xf.values)
+            
+            # Smooth
+            # assert X.shape[-1] == 1 # !! Only makes sense for 1d input
+            # y = sub.mean_score.rolling(window=40).mean().values
+            # X, y = X[~np.isnan(y)], y[~np.isnan(y)]
+            
+            y = sub.mean_score.values
+            
+            # Scale to [0, 1]
+            y = (y - y.min()) / (y.max() - y.min())
+            
+            y = y.reshape(-1, 1)
+            
+            # Minimize (by convention)
+            y = -1 * y
+            
+            self.data_dict[task_id] = (X, y)
         
         self.x_cols = ['param_cost', 'param_degree', 'param_gamma', 'param_kernel']
         
@@ -292,12 +307,20 @@ class SVCFileDataset(_BaseDataset):
         # params = data[[c for c in data.columns if 'param_' in c]]
         # Xf = prep.fit_transform(params)
         # --
+        # print('FileDataset: linear kernel only', file=sys.stderr)
+        # data = data[data.param_linear_kernel.astype(bool)]
+        # data = data.sort_values('param_cost').reset_index(drop=True)
+        # del data['param_gamma']
+        # del data['param_degree']
+        # Xf = np.log10(data.param_cost.values.reshape(-1, 1))
+        # # Xf = (Xf - Xf.mean()) / Xf.std()
+        
         print('FileDataset: linear kernel only', file=sys.stderr)
-        data = data[data.param_linear_kernel.astype(bool)]
-        del data['param_gamma']
+        data = data[data.param_rbf_kernel.astype(bool)]
+        data = data.sort_values('param_cost').reset_index(drop=True)
         del data['param_degree']
-        Xf = np.log10(data.param_cost.values.reshape(-1, 1))
-        Xf = (Xf - Xf.mean()) / Xf.std()
+        Xf = np.log10(data[['param_cost', 'param_gamma']].values)
+        # Xf = (Xf - Xf.mean()) / Xf.std()
         # <<
         
         self.x_dim = Xf.shape[1]
@@ -305,19 +328,19 @@ class SVCFileDataset(_BaseDataset):
         
         return data
     
-    def sample_one(self, support_size, query_size):
-        task_id = np.random.choice(self.task_ids)
+    def sample_one(self, support_size, query_size, task_id=None):
+        if task_id is None:
+            task_id = np.random.choice(self.task_ids)
         
-        sub = self.data_dict[task_id]
+        X, y = self.data_dict[task_id]
         
-        sel = np.random.choice(sub['x'].shape[0], support_size + query_size, replace=False)
-        x   = sub['x'][sel]
-        y   = sub['y'][sel]
+        sel  = np.random.choice(X.shape[0], support_size + query_size, replace=False)
+        X, y = X[sel], y[sel]
         
-        x_support, x_query = x[:support_size], x[support_size:]
+        X_support, X_query = X[:support_size], X[support_size:]
         y_support, y_query = y[:support_size], y[support_size:]
         
-        return x_support, y_support, x_query, y_query, {"task_id" : task_id}
+        return X_support, y_support, X_query, y_query, {"task_id" : task_id}
 
 # # --
 # # Gradient descent on absolute value function
