@@ -184,6 +184,9 @@ _ = plt.plot(rand_median, c='blue', alpha=0.5, label='median(rand)')
 _ = [plt.plot(xx, alpha=0.01, c='blue') for xx in rand_adj]
 
 _ = plt.legend()
+_ = plt.title('ALPACA-BO vs RANDOM')
+_ = plt.xlabel('iteration')
+_ = plt.ylabel('(opt_score - score) / opt_score')
 _ = plt.yscale('log')
 show_plot()
 
