@@ -91,15 +91,36 @@ class BLR(nn.Module):
 # NN Helper
 
 class _TrainMixin:
-    def _run_loop(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, metric_fn=metrics.mean_squared_error):
+    def _run_loop(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, 
+        metric_fn=metrics.mean_squared_error, mixup=False):
+        
         hist = []
         gen = trange(num_samples // batch_size)
         for batch_idx in gen:
-            x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
-                batch_size=batch_size,
-                support_size=support_size, # Could sample this horizon for robustness
-                query_size=query_size,     # Could sample this horizon for robustness
-            )
+            if isinstance(dataset, list):
+                idxs = np.random.choice(len(dataset), batch_size)
+                x_support, y_support, x_query, y_query, _ =\
+                    list(zip(*[dataset[idx] for idx in idxs]))
+                
+                x_support, y_support, x_query, y_query =\
+                    [np.stack(xx) for xx in (x_support, y_support, x_query, y_query)]
+                
+            else:
+                x_support, y_support, x_query, y_query, _ = dataset.sample_batch(
+                    batch_size=batch_size,
+                    support_size=support_size, # Could sample this horizon for robustness
+                    query_size=query_size,     # Could sample this horizon for robustness
+                )
+            
+            # >>
+            if mixup:
+                lam          = np.random.uniform(0, 1, (x_support.shape[0], 1, 1))
+                pidx         = np.random.permutation(x_support.shape[0])
+                x_support    = lam * x_support + (1 - lam) * x_support[pidx]
+                y_support    = lam * y_support + (1 - lam) * y_support[pidx]
+                x_query      = lam * x_query + (1 - lam) * x_query[pidx]
+                y_query      = lam * y_query + (1 - lam) * y_query[pidx]
+            # <<
             
             inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
             
@@ -172,10 +193,10 @@ class ALPACA(_TrainMixin, nn.Module):
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             _act(),
-            BN(hidden_dim),
+            # BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             _act(),
-            BN(hidden_dim),
+            # BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             _act(), # Do we want this?
         )

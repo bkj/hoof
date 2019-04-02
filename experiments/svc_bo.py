@@ -1,56 +1,60 @@
 #!/usr/bin/env python
 
 """
-    simple_example.py
+    svc_bo_clean.py
 """
+
+from rsub import *
+from matplotlib import pyplot as plt
 
 import sys
 import numpy as np
 import pandas as pd
 from time import time
 from tqdm import tqdm, trange
+from scipy.spatial.distance import cdist
 
 import torch
 from torch import nn
 
-from rsub import *
-from matplotlib import pyplot as plt
-
-from hoof.dataset import FileDataset
+from hoof.dataset import SVCFileDataset
 from hoof.models import ALPACA
 from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
 from hoof.bayesopt import gaussian_ei
 
-torch.set_num_threads(1)
-set_seeds(345)
+torch.set_num_threads(2)
+set_seeds(555)
 
 # --
 # Dataset
 
 path = 'data/topk.jl'
-train_dataset = FileDataset(path=path)
-valid_dataset = FileDataset(path=path)
+train_dataset = SVCFileDataset(path=path)
+valid_dataset = SVCFileDataset(path=path)
 
 # Non-overlapping tasks
 num_tasks = len(train_dataset.task_ids)
+num_train_tasks = 25
 task_ids  = np.random.permutation(train_dataset.task_ids)
-train_dataset.task_ids, valid_dataset.task_ids = task_ids[:20], task_ids[20:]
+train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], task_ids[num_train_tasks:]
+
+assert (train_dataset.data.param_rbf_kernel).all()
 
 # --
 # Train
 
-model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.2, hidden_dim=128, activation='relu').cuda()
+print('x_dim=%d' % train_dataset.x_dim, file=sys.stderr)
+
+model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, 
+    sig_eps=0.01, hidden_dim=64, activation='relu').cuda()
+
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+
+train_kwargs = {"batch_size" : 256, "query_size" : 100, "num_samples" : 30000, "mixup" : False}
 
 train_history = []
-lrs = [1e-4, 1e-5]
-opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
-
-train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
-
-for lr in lrs:
-    set_lr(opt, lr)
-    
-    train_history  += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
+for support_size in [10, 8, 6, 4, 10]:
+    train_history += model.do_train(dataset=train_dataset, opt=opt, support_size=support_size, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
@@ -59,148 +63,80 @@ for lr in lrs:
     show_plot()
 
 
-valid_history = model.valid(dataset=valid_dataset, **train_kwargs)
+valid_history = model.do_valid(dataset=valid_dataset, support_size=10, **train_kwargs)
 
 print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
 print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
 
 # --
-# Plot
-
-data_dict = valid_dataset.data_dict
-
-list(data_dict.keys())
-
-task_id = 3492
-support_size = data_dict[task_id]['x'].shape[0]
-# orig_task_ids = valid_dataset.task_ids
-valid_dataset.task_ids = [task_id]
-
-x_all, y_all, _, _, fn = valid_dataset.sample_one(support_size=support_size, query_size=0)
-
-x_all, y_all = x_all[np.argsort(x_all.squeeze())], y_all[np.argsort(x_all.squeeze())]
-
-x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=2, query_size=0)
-
-inp = list2tensors((x_s, y_s, x_all), cuda=model.is_cuda)
-mu, sig, _ = model(*inp)
-mu, sig = tensors2list((mu, sig), squeeze=True)
-
-_ = plt.plot(x_all, y_all, c='black', alpha=0.25)
-_ = plt.plot(x_all, mu)
-_ = plt.fill_between(x_all.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
-_ = plt.scatter(x_s, y_s, c='red')
-# _ = plt.xlim(*valid_dataset.x_range)
-show_plot()
-
-
-# --
 # Run BO experiment
 
-umodel = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.01, hidden_dim=128, activation='tanh')
-umodel = umodel.cuda()
+_ = model.eval()
 
-res = []
-for _ in range(100):
-    burnin_size         = train_kwargs['support_size']
-    num_rounds          = 10
-    num_bo_candidates   = 10000
-    num_rand_candidates = 500
+def random_search(x_all, y_all, num_candidates=500):
+    rand_sel  = np.random.choice(x_all.shape[0], num_candidates, replace=True)
+    rand_y    = y_all[rand_sel].squeeze()
+    return pd.Series(rand_y).cummin().values
+
+def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2):
+    burnin_sel = np.random.choice(x_all.shape[0], burnin_size, replace=False)
+    x_visited, y_visited = x_all[burnin_sel], y_all[burnin_sel]
     
-    x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=burnin_size, query_size=0)
-    x_s_orig, y_s_orig = x_s.copy(), y_s.copy()
+    traj = np.sort(y_visited.squeeze())[::-1]
     
-    task_x = valid_dataset.data_dict[fn['task_id']]['x']
-    task_y = valid_dataset.data_dict[fn['task_id']]['y']
-    y_opt  = task_y.max()
-    
-    # --
-    # BO w/ trained model
-    
-    x_s, y_s  = x_s_orig.copy(), y_s_orig.copy()
-    incumbent = y_s.max()
-    
-    model_traj = y_s.squeeze()
     for _ in range(num_rounds):
-        bo_sel = np.random.choice(task_x.shape[0], num_bo_candidates)
-        x_cand = task_x[bo_sel]
+        # !! Simple way to force exploration
+        explore = cdist(x_all, x_visited).min(axis=-1) > 0.05
+        x_cand, y_cand = x_all[explore], y_all[explore]
         
-        inp = list2tensors((x_s, y_s, x_cand), cuda=model.is_cuda)
+        inp = list2tensors((x_visited, y_visited, x_cand), cuda=model.is_cuda)
         mu, sig, _ = model(*inp)
         mu, sig = tensors2list((mu, sig), squeeze=True)
         
-        mu = -mu
+        ei = gaussian_ei(mu, sig, incumbent=y_visited.min())
         
-        ei = gaussian_ei(mu, sig, incumbent=incumbent)
+        best_idx = ei.argmax()
+        next_x, next_y = x_cand[best_idx], y_cand[best_idx]
         
-        next_x = x_cand[ei.argmax()]
-        next_y = task_y[bo_sel][ei.argmax()]
+        x_visited = np.vstack([x_visited, next_x])
+        y_visited = np.vstack([y_visited, next_y])
         
-        x_s = np.vstack([x_s, next_x])
-        y_s = np.vstack([y_s, next_y])
-        incumbent = y_s.max()
-        
-        model_traj = np.hstack([model_traj, [incumbent]])
+        traj = np.hstack([traj, [y_visited.min()]])
     
-    # >>
-    # --
-    # BO w/ trained model
+    return traj
+
+
+dataset = valid_dataset
+
+res = []
+for _ in trange(100):
     
-    x_s, y_s  = x_s_orig.copy(), y_s_orig.copy()
-    incumbent = y_s.max()
+    task_id      = np.random.choice(dataset.task_ids)
+    x_all, y_all = dataset.data_dict[task_id]
+    y_opt        = y_all.min()
     
-    umodel_traj = y_s.squeeze()
-    for _ in range(num_rounds):
-        bo_sel = np.random.choice(task_x.shape[0], num_bo_candidates)
-        x_cand = task_x[bo_sel]
-        
-        inp = list2tensors((x_s, y_s, x_cand), cuda=model.is_cuda)
-        mu, sig, _ = umodel(*inp)
-        mu, sig = tensors2list((mu, sig), squeeze=True)
-        
-        mu = -mu
-        
-        ei = gaussian_ei(mu, sig, incumbent=incumbent)
-        
-        next_x = x_cand[ei.argmax()]
-        next_y = task_y[bo_sel][ei.argmax()]
-        
-        x_s = np.vstack([x_s, next_x])
-        y_s = np.vstack([y_s, next_y])
-        incumbent = y_s.max()
-        
-        umodel_traj = np.hstack([umodel_traj, [incumbent]])
-        
-    # <<
-    # --
-    # Random
-    
-    rand_sel  = np.random.choice(task_x.shape[0], num_rand_candidates, replace=True)
-    rand_cand = task_x[rand_sel]
-    rand_y    = task_y[rand_sel]
-    rand_traj = pd.Series(rand_y.squeeze()).cummin().values
+    model_traj = alpaca_bo(model, x_all, y_all)
+    rand_traj  = random_search(x_all, y_all)
     
     res.append({
-        "opt"          : y_opt,
-        "rand"         : rand_traj[-1],
-        "umodel_final" : umodel_traj[-1],
-        "umodel_first" : umodel_traj[burnin_size],
-        "model_final"  : model_traj[-1],
-        "model_first"  : model_traj[burnin_size],
+        "task_id" : task_id,
+        "opt"     : y_opt,
+        "model"   : np.array(model_traj),
+        "rand"    : np.array(rand_traj),
     })
-    print(res[-1])
 
 
-res = pd.DataFrame(res)
-(res.model_first >= res.umodel_first).mean()
-(res.model_final >= res.umodel_final).mean()
+model_adj  = [(xx['opt'] - xx['model']) / xx['opt'] for xx in res]
+rand_adj   = [(xx['opt'] - xx['rand']) / xx['opt'] for xx in res]
 
-res.mean()
+_ = plt.plot(np.stack(model_adj).mean(axis=0), c='red')
+_ = [plt.plot(xx, alpha=0.01, c='red') for xx in model_adj]
 
-# I suspect all of the samples are _super_ close together
+_ = plt.plot(np.stack(rand_adj).mean(axis=0), c='black')
+_ = [plt.plot(xx, alpha=0.01, c='black') for xx in rand_adj]
 
-
-
-
+_ = plt.xlim(0, 35)
+_ = plt.ylim(0, 0.1)
+show_plot()
 
 

@@ -20,7 +20,7 @@ from hoof.models import ALPACA, rks_regression
 from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
 
 torch.set_num_threads(1)
-set_seeds(345)
+set_seeds(111)
 
 # --
 # Dataset
@@ -54,7 +54,6 @@ valid_dataset = dataset_cls()
 # Train
 
 model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='tanh').cuda()
-model.blr.sample_horizon = True
 
 train_history = []
 lrs = [1e-4, 1e-5]
@@ -62,10 +61,17 @@ opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
 train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
+# >>
+train_problems = [train_dataset.sample_one(
+    support_size=train_kwargs['support_size'],
+    query_size=train_kwargs['query_size'],
+) for _ in range(30)]
+# <<
+
 for lr in lrs:
     set_lr(opt, lr)
     
-    train_history += model.train(dataset=train_dataset, opt=opt, **train_kwargs)
+    train_history += model.do_train(dataset=train_problems, opt=opt, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
@@ -74,7 +80,7 @@ for lr in lrs:
     show_plot()
 
 
-valid_history = model.valid(dataset=valid_dataset, **train_kwargs)
+valid_history = model.do_valid(dataset=valid_dataset, **train_kwargs)
 
 print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
 print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
@@ -98,7 +104,7 @@ for i in range(3):
         
         _ = ax[i,j].plot(x_grid, y_grid, c='black', alpha=0.25)
         _ = ax[i,j].plot(x_grid, mu)
-        _ = ax[i,j].plot(x_grid, y_prior.squeeze())
+        # _ = ax[i,j].plot(x_grid, y_prior.squeeze())
         # _ = ax[i,j].plot(x_grid, rks_regression(x_s, y_s, x_grid, n_components=50, gamma=0.25), c='orange', alpha=0.75)
         _ = ax[i,j].fill_between(x_grid.squeeze(), mu - 1.96 * np.sqrt(sig), mu + 1.96 * np.sqrt(sig), alpha=0.2)
         _ = ax[i,j].scatter(x_s, y_s, c='red')

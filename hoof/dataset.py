@@ -242,16 +242,10 @@ class SVCFileDataset(_BaseDataset):
             sub = self.data[self.data.task_id == task_id]
             
             X = np.vstack(sub.Xf.values)
-            
-            # Smooth
-            # assert X.shape[-1] == 1 # !! Only makes sense for 1d input
-            # y = sub.mean_score.rolling(window=40).mean().values
-            # X, y = X[~np.isnan(y)], y[~np.isnan(y)]
-            
             y = sub.mean_score.values
             
             # Scale to [0, 1]
-            y = (y - y.min()) / (y.max() - y.min())
+            # y = (y - y.min()) / (y.max() - y.min())
             
             y = y.reshape(-1, 1)
             
@@ -278,49 +272,26 @@ class SVCFileDataset(_BaseDataset):
             "param_gamma"         : xx['params'].get('gamma', None),
             "param_degree"        : xx['params'].get('degree', None),
         } for xx in data]
+        
         data = pd.DataFrame(data, columns=list(data[0].keys()))
+        data = data.sort_values('param_cost').reset_index(drop=True)
         
         for c in ['param_cost', 'param_gamma', 'param_degree']:
             data[c] = data[c].astype(np.float64)
         
+        data.param_degree = data.param_degree.fillna(1)
+        data.param_cost   = np.log10(data.param_cost)
+        data.param_gamma  = np.log10(data.param_gamma)
+        
+        param_degree_cols = []
+        for v in data.param_degree.unique():
+            data['param_degree_%d' % v] = data.param_degree == v
+            param_degree_cols.append('param_degree_%d' % v)
+        
         # >>
-        # # !! Missing value indicator?
-        # # nominal_indices = [0, 1, 2]
-        # numeric_indices = [3, 4, 5]
-        # prep = sklearn.pipeline.make_pipeline(
-        #     sklearn.compose.ColumnTransformer(
-        #         transformers=[
-        #             ('numeric', sklearn.pipeline.make_pipeline(
-        #                 sklearn.preprocessing.Imputer(),
-        #                 sklearn.preprocessing.StandardScaler(),
-        #             ), numeric_indices),
-        #             # ('nominal', sklearn.pipeline.make_pipeline(
-        #             #     sklearn.impute.SimpleImputer(strategy='constant', fill_value=-1),
-        #             #     sklearn.preprocessing.OneHotEncoder(handle_unknown='ignore'),
-        #             # ), nominal_indices)
-        #         ],
-        #         remainder='passthrough',
-        #     ),
-        #     sklearn.feature_selection.VarianceThreshold(),
-        # )
-        
-        # params = data[[c for c in data.columns if 'param_' in c]]
-        # Xf = prep.fit_transform(params)
-        # --
-        # print('FileDataset: linear kernel only', file=sys.stderr)
-        # data = data[data.param_linear_kernel.astype(bool)]
-        # data = data.sort_values('param_cost').reset_index(drop=True)
-        # del data['param_gamma']
-        # del data['param_degree']
-        # Xf = np.log10(data.param_cost.values.reshape(-1, 1))
-        # # Xf = (Xf - Xf.mean()) / Xf.std()
-        
-        print('FileDataset: linear kernel only', file=sys.stderr)
+        print('FileDataset: rbf kernel only', file=sys.stderr)
         data = data[data.param_rbf_kernel.astype(bool)]
-        data = data.sort_values('param_cost').reset_index(drop=True)
-        del data['param_degree']
-        Xf = np.log10(data[['param_cost', 'param_gamma']].values)
-        # Xf = (Xf - Xf.mean()) / Xf.std()
+        Xf   = data[['param_cost', 'param_gamma']].values
         # <<
         
         self.x_dim = Xf.shape[1]
@@ -342,273 +313,6 @@ class SVCFileDataset(_BaseDataset):
         
         return X_support, y_support, X_query, y_query, {"task_id" : task_id}
 
-# # --
-# # Gradient descent on absolute value function
-
-# def _make_abs_func(slope, start):
-#     def _f(x):
-#         return slope * np.abs(x)
-        
-#     def _grad(x):
-#         return slope * np.sign(x)
-        
-#     def _do_run(alpha, num_steps=10):
-#         p = start
-#         for _ in range(num_steps):
-#             p -= (10 ** alpha) * _grad(p)
-        
-#         return _f(p)
-    
-#     return _do_run
 
 
-# class AbsValDataset:
-#     def __init__(self, x_range=[-3, -0.5], slope_range=[0.5, 5], start_range=[-2, 2], popsize=None, seed=None):
-        
-#         self.x_range     = x_range
-#         self.slope_range = slope_range
-#         self.start_range = start_range
-        
-#         if not seed:
-#             seed = np.random.choice(2 ** 15)
-        
-#         self.seed = seed
-#         self.rng  = np.random.RandomState(seed)
-        
-#         self.popsize = popsize
-#         if self.popsize is not None:
-#             self._params = [self._sample_params() for _ in range(self.popsize)]
-    
-#     def set_seed(self, seed):
-#         self.seed = seed
-#         self.rng  = np.random.RandomState(seed)
-    
-#     def _sample_params(self):
-#         slope = self.rng.uniform(*self.slope_range)
-#         start = self.rng.uniform(*self.start_range)
-#         return slope, start
-    
-#     def _get_params(self):
-#         if self.popsize is None:
-#             return self._sample_params()
-#         else:
-#             return self._params[self.rng.choice(self.popsize)]
-    
-#     def sample(self, n_funcs, train_samples, test_samples):
-        
-#         x_c = self.rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
-#         x   = self.rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
-        
-#         y_c = np.zeros((n_funcs, train_samples, 1))
-#         y   = np.zeros((n_funcs, test_samples, 1))
-        
-#         funcs = []
-#         for i in range(n_funcs):
-#             params = self._get_params()
-#             _f     = _make_abs_func(*params)
-#             y_c[i] = _f(x_c[i])
-#             y[i]   = _f(x[i])
-#             funcs.append(copy(_f))
-        
-#         return x_c, y_c, x, y, funcs
 
-# # --
-# # Make pow func
-
-# def _make_pow_func(c, p):
-#     def _f(x):
-#         y = c * x ** p
-#         return y
-    
-#     return _f
-
-# class PowerDataset:
-#     def __init__(self, x_range=[0, 1]):
-#         self.x_range = x_range
-    
-#     def sample(self, n_funcs, train_samples, test_samples, rng=None):
-#         if rng is None:
-#             rng = np.random
-        
-#         x_c = rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
-#         x   = rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
-        
-#         y_c = np.zeros((n_funcs, train_samples, 1))
-#         y   = np.zeros((n_funcs, test_samples, 1))
-        
-#         funcs = []
-#         for i in range(n_funcs):
-            
-#             c = rng.uniform(1, 5)
-#             p = np.random.choice([2, 3, 100])
-            
-#             _f     = _make_pow_func(c, p)
-#             y_c[i] = _f(x_c[i])
-#             y[i]   = _f(x[i])
-            
-#             funcs.append(copy(_f))
-        
-#         return x_c, y_c, x, y, funcs
-
-# # --
-# # Parameterized Quadratic
-
-# def _make_pquad_func(alpha):
-#     def _f(x):
-#         return (
-#             0.5 * alpha[0] * (x ** 2) +
-#             alpha[1] * x +
-#             alpha[2]
-#         )
-    
-#     return _f
-
-
-# class PQuadDataset(_BaseDataset):
-#     def __init__(self, x_range=[-5, 5], x_dim=1, **kwargs):
-#         self.x_range = x_range
-#         self.x_dim   = x_dim
-        
-#         super().__init__(**kwargs)
-    
-#     def _sample_params(self):
-#         return self.rng.uniform(0.1, 10, 3)
-    
-#     def sample(self, n_funcs, train_samples, test_samples):
-        
-#         x_c = self.rng.uniform(*self.x_range, (n_funcs, train_samples, self.x_dim))
-#         x   = self.rng.uniform(*self.x_range, (n_funcs, test_samples, self.x_dim))
-        
-#         y_c = np.zeros((n_funcs, train_samples, 1))
-#         y   = np.zeros((n_funcs, test_samples, 1))
-        
-#         funcs = []
-#         for i in range(n_funcs):
-            
-#             alpha  = self._get_params()
-#             _f     = _make_pquad_func(alpha)
-#             y_c[i] = _f(x_c[i])
-#             y[i]   = _f(x[i])
-            
-#             funcs.append(copy(_f))
-        
-#         return x_c, y_c, x, y, funcs
-
-
-# # # --
-
-# # def _make_quadratic_func(xo, yo, rng):
-# #     def _f(x):
-# #         y = (x + xo) ** 2 + yo
-# #         return y
-    
-# #     return _f
-
-# # class QuadraticDataset:
-# #     def __init__(self, x_range=[-2, -2]):
-# #         self.x_range = x_range
-    
-# #     def sample(self, n_funcs, train_samples, test_samples, rng=None):
-# #         if rng is None:
-# #             rng = np.random
-        
-# #         x_c = rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
-# #         x   = rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
-        
-# #         y_c = np.zeros((n_funcs, train_samples, 1))
-# #         y   = np.zeros((n_funcs, test_samples, 1))
-        
-# #         funcs = []
-# #         for i in range(n_funcs):
-            
-# #             xo = rng.uniform(-1, 1)
-# #             yo = rng.uniform(-1, 1)
-            
-# #             _f     = _make_quadratic_func(xo, yo, rng)
-# #             y_c[i] = _f(x_c[i])
-# #             y[i]   = _f(x[i])
-            
-# #             funcs.append(copy(_f))
-        
-# #         return x_c, y_c, x, y, funcs
-
-# # --
-
-# # import warnings
-# # warnings.filterwarnings("ignore", category=FutureWarning)
-
-# # from sklearn.linear_model import SGDClassifier
-# # from sklearn.model_selection import train_test_split
-
-# # def _make_sgd_func(rng, dim=5, nobs=1000, pos_mean=0, pos_std=1, neg_mean=1, neg_std=1):
-# #     warnings.filterwarnings("ignore", category=FutureWarning)
-# #     pos = rng.normal(pos_mean, pos_std, (nobs, dim))
-# #     neg = rng.normal(neg_mean, neg_std, (nobs, dim))
-# #     X   = np.vstack([pos, neg]).astype(float)
-# #     X /= np.sqrt((X ** 2).sum(axis=-1, keepdims=True))
-# #     y   = np.hstack([
-# #         np.ones(pos.shape[0]),
-# #         np.zeros(neg.shape[0])
-# #     ])
-    
-# #     X_train, X_test, y_train, y_test = train_test_split(X, y, train_size=0.5)
-    
-# #     def _f(alphas):
-# #         accs = []
-# #         for alpha in alphas:
-# #             sgd = SGDClassifier(learning_rate='constant', eta0=10 ** float(alpha), random_state=111)
-# #             sgd = sgd.fit(X_train, y_train)
-# #             preds = sgd.predict(X_test)
-# #             acc = (y_test == preds).mean()
-# #             accs.append(acc)
-        
-# #         return np.array(accs).reshape(alphas.shape)
-    
-# #     return _f
-
-# # class SGDDataset:
-# #     def __init__(self, x_range=[-5, 0]):
-# #         self.x_range = x_range
-    
-# #     def sample(self, n_funcs, train_samples, test_samples, rng=None):
-# #         if rng is None:
-# #             rng = np.random
-        
-# #         x_c = rng.uniform(*self.x_range, (n_funcs, train_samples, 1))
-# #         x   = rng.uniform(*self.x_range, (n_funcs, test_samples, 1))
-        
-# #         y_c = np.zeros((n_funcs, train_samples, 1))
-# #         y   = np.zeros((n_funcs, test_samples, 1))
-        
-# #         funcs = []
-# #         for i in range(n_funcs):
-# #             _f     = _make_sgd_func(rng)
-# #             y_c[i] = _f(x_c[i])
-# #             y[i]   = _f(x[i])
-            
-# #             funcs.append(copy(_f))
-        
-# #         return x_c, y_c, x, y, funcs
-
-# # # --
-
-# # from time import time
-# # from joblib import Parallel, delayed
-
-# # class CacheDataset:
-# #     def __init__(self, dataset, n_batches, n_jobs=32, **kwargs):
-# #         self.n_batches = n_batches
-# #         self.offset    = 0
-        
-# #         # self._cache = [None] * n_batches
-# #         # for idx in range(n_batches):
-# #         #     self._cache[idx] = dataset.sample(**kwargs)
-# #         #     # Make this parallel
-        
-# #         jobs = [delayed(dataset.sample)(rng=np.random.RandomState(i), **kwargs) for i in range(n_batches)]
-# #         self._cache = Parallel(n_jobs=n_jobs)(jobs)
-        
-# #     def sample(self, *args, **kwargs):
-# #         out = self._cache[self.offset]
-# #         self.offset = (self.offset + 1) % self.n_batches
-# #         return out
