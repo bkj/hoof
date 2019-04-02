@@ -128,7 +128,13 @@ train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], tas
 
 print('x_dim=%d' % train_dataset.x_dim, file=sys.stderr)
 
-model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, sig_eps=0.01, hidden_dim=128, activation='Tanh')
+model = ALPACA(
+    input_dim=train_dataset.x_dim,
+    output_dim=1,
+    sig_eps=0.001,
+    hidden_dim=128,
+    activation='ReLU'
+)
 
 opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -145,7 +151,7 @@ for lr in [1e-3, 1e-4]:
     mse_hist, nll_hist = model.do_train(
         dataset=train_dataset,
         opt=opt, 
-        support_size=[2, 5],
+        support_size=[1, 7],
         **train_kwargs
     )
     
@@ -157,7 +163,13 @@ _ = plt.grid()
 _ = plt.legend()
 show_plot()
 
-valid_mse_history, valid_nll_history = model.do_valid(dataset=valid_dataset, support_size=10, **train_kwargs)
+valid_mse_history, valid_nll_history = model.do_valid(
+    dataset=valid_dataset, 
+    support_size=10,
+    batch_size=train_kwargs['batch_size'],
+    query_size=train_kwargs['query_size'],
+    num_samples=train_kwargs['num_samples'] // 10,
+)
 
 print('final_train_mse=%f' % np.mean(train_mse_history[-100:]), file=sys.stderr)
 print('final_train_nll=%f' % np.mean(train_nll_history[-100:]), file=sys.stderr)
@@ -236,7 +248,8 @@ model   = model.cpu()
 model   = model.eval()
 dataset = valid_dataset
 
-# model.blr.sig_eps.data += 0.1 # ?? This seems to help sometimes
+# !! This seems to help, especially at the end of training
+# model.blr.sig_eps.data *= 10 # ?? This seems to help sometimes
 
 jobs = []
 num_valid_tasks = len(dataset.task_ids)
@@ -256,8 +269,8 @@ res = Parallel(n_jobs=60, verbose=10)(jobs)
 
 df = valid_dataset.data
 def agg_and_plot(res, name, c='black'):
-    adj    = np.stack([(xx['opt'] - xx[name]) / xx['opt'] for xx in res])
-    # adj    = np.stack([(r[name].reshape(-1, 1) <= - df[df.task_id == r['task_id']].valid_score.values).mean(axis=-1) for r in res])
+    # adj    = np.stack([(xx['opt'] - xx[name]) / xx['opt'] for xx in res])
+    adj    = np.stack([(r[name].reshape(-1, 1) <= - df[df.task_id == r['task_id']].valid_score.values).mean(axis=-1) for r in res])
     mean   = np.mean(adj, axis=0)
     median = np.median(adj, axis=0)
     _ = plt.plot(mean, c=c, linewidth=3, label='mean(%s)' % name)
@@ -279,8 +292,8 @@ _ = plt.legend()
 _ = plt.title('ALPACA-BO vs RANDOM')
 _ = plt.xlabel('iteration')
 _ = plt.ylabel('(opt_score - score) / opt_score')
-_ = plt.yscale('log')
-# _ = plt.ylim(0.95, 1.0)
+# _ = plt.yscale('log')
+_ = plt.ylim(0.95, 1.0)
 _ = plt.xscale('log')
 _ = plt.grid()
 show_plot()
@@ -288,26 +301,5 @@ show_plot()
 model_adj[:,-1].mean()
 rand_adj[:,model_adj.shape[1]].mean()
 
-# # Show performance by task
-# # task_id = np.random.choice(dataset.task_ids)
-# # idxs = np.where([r['task_id'] == task_id for r in res])[0]
-# # _ = [plt.plot(- res[idx]['model'], alpha=0.1, c='red') for idx in idxs]
-# # _ = [plt.plot(- res[idx]['rand'], alpha=0.1, c='blue') for idx in idxs]
-# # _ = plt.xlim(-1, 32)
-# # show_plot()
 
-# # On some, scores get very good right away (this is more obvious in SVC example)
-# # _ = plt.plot(model_median, c='red', label='median(model)')
-# # _ = plt.plot(rand_median, c='blue', label='median(rand)')
-# # _ = plt.legend()
-# # _ = plt.ylim(0.0, 0.05)
-# # _ = plt.xlim(0, 30)
-# # show_plot()
 
-# # How long does it take rand to catch model?
-# model_mean.shape[0]
-# rand_wins = rand_mean < model_mean[-1]
-# if not rand_wins.any():
-#     print('rand never wins!', file=sys.stderr)
-# else:
-#     print('rand wins after %d rounds' % np.where()[0][0], file=sys.stderr)

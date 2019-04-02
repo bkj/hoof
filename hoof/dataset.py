@@ -61,7 +61,8 @@ class _BaseDataset:
     
     def sample_batch(self, support_size, query_size, batch_size):
         if isinstance(support_size, list):
-            support_size = int(np.random.uniform(*support_size))
+             # Sam
+            support_size = int(2 ** np.random.uniform(*support_size))
         
         samples = [self.sample_one(support_size=support_size, query_size=query_size) for _ in range(batch_size)]
         x_support, y_support, x_query, y_query, fn = list(zip(*samples))
@@ -324,27 +325,27 @@ class SVCFileDataset(_BaseDataset):
 
 # --
 
-import openml
-openml100 = openml.tasks.list_tasks(tag='openml100')
-openml100 = pd.DataFrame.from_dict(openml100, orient='index')
-openml100 = openml100.sort_values('NumberOfInstances')
+# import openml
+# openml100 = openml.tasks.list_tasks(tag='openml100')
+# openml100 = pd.DataFrame.from_dict(openml100, orient='index')
+# openml100 = openml100.sort_values('NumberOfInstances')
 
-openml_cols = [
-    "NumberOfClasses",
-    "NumberOfFeatures",
-    "NumberOfInstances",
-    "NumberOfNumericFeatures",
-    "NumberOfSymbolicFeatures",
-]
+# openml_cols = [
+#     "NumberOfClasses",
+#     "NumberOfFeatures",
+#     "NumberOfInstances",
+#     "NumberOfNumericFeatures",
+#     "NumberOfSymbolicFeatures",
+# ]
 
 class RFFileDataset(_BaseDataset):
     def __init__(self, path=None, data=None, **kwargs):
-        assert (path is not None) or (data is not None)
-        
         if path is not None:
             self.data = self._load_data(path)
-        else:
+        elif data is not None:
             self.data = data.copy()
+        else:
+            raise Exception('!! RFFileDataset: must set path or data')
         
         self.task_ids = list(set(self.data.task_id))
         
@@ -353,10 +354,7 @@ class RFFileDataset(_BaseDataset):
             sub = self.data[self.data.task_id == task_id]
             
             X = np.vstack(sub.Xf.values)
-            y = sub.valid_score.values
-            y = y.reshape(-1, 1)
-            
-            y = -1 * y
+            y = -1 * sub.valid_score.values.reshape(-1, 1)
             
             self.data_dict[task_id] = (X, y)
         
