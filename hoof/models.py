@@ -25,10 +25,15 @@ from hoof.helpers import HoofMetrics as metrics
 # Bayesian Linear Regression
 
 class BLR(nn.Module):
-    def __init__(self, sig_eps, input_dim, output_dim):
+    def __init__(self, sig_eps, input_dim, output_dim, train_sig_eps=False):
         super().__init__()
         
-        self.sig_eps = sig_eps
+        sig_eps = torch.Tensor([sig_eps])
+        if train_sig_eps:
+            self.sig_eps = nn.Parameter(sig_eps)
+        else:
+            self.register_buffer('sig_eps', sig_eps)
+        
         self.register_buffer('eye', torch.eye(output_dim))
         
         self.m_prior = nn.Parameter(torch.zeros(input_dim, output_dim))
@@ -78,7 +83,7 @@ class BLR(nn.Module):
     def _sig_logdet(self, spread_fac):
         # Compute logdet(sig)
         # Equivalent to [[ss.logdet() for ss in s] for s in sig]
-        return self.output_dim * (spread_fac.log() + np.log(self.sig_eps))
+        return self.output_dim * (spread_fac.log() + torch.log(self.sig_eps))
 
 # --
 # NN Helper
@@ -178,6 +183,23 @@ class BN(nn.Module):
         x = x.view(bs, obs, d)
         return x
 
+class Block(nn.Module):
+    def __init__(self, input_dim, output_dim, act, skip=False):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.act    = act()
+        self.bn     = BN(output_dim)
+        self.skip   = skip
+    
+    def forward(self, x_inp):
+        x = self.linear(x_inp)
+        x = self.bn(x)
+        x = self.act(x)
+        if self.skip:
+            return x + x_inp
+        else:
+            return x
+
 class ALPACA(_TrainMixin, nn.Module):
     def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='Tanh', hidden_dim=128):
         super().__init__()
@@ -185,16 +207,9 @@ class ALPACA(_TrainMixin, nn.Module):
         _act = getattr(nn, activation)
         
         self.backbone = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            _act(),
-            BN(hidden_dim),
-            
-            nn.Linear(hidden_dim, hidden_dim),
-            _act(),
-            BN(hidden_dim),
-            
-            nn.Linear(hidden_dim, hidden_dim),
-            _act(), # Do we want this last activation?
+            Block(input_dim, hidden_dim, _act),
+            Block(hidden_dim, hidden_dim, _act, skip=False),
+            Block(hidden_dim, hidden_dim, _act, skip=False),
         )
         
         self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, output_dim=output_dim)

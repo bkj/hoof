@@ -324,6 +324,18 @@ class SVCFileDataset(_BaseDataset):
 
 # --
 
+import openml
+openml100 = openml.tasks.list_tasks(tag='openml100')
+openml100 = pd.DataFrame.from_dict(openml100, orient='index')
+openml100 = openml100.sort_values('NumberOfInstances')
+
+openml_cols = [
+    "NumberOfClasses",
+    "NumberOfFeatures",
+    "NumberOfInstances",
+    "NumberOfNumericFeatures",
+    "NumberOfSymbolicFeatures",
+]
 
 class RFFileDataset(_BaseDataset):
     def __init__(self, path=None, data=None, **kwargs):
@@ -369,11 +381,9 @@ class RFFileDataset(_BaseDataset):
                     df['%s-%s' % (c, uval)] = df[c].apply(lambda x: x == uval).astype(int)
                     param_cols.append('%s-%s' % (c, uval))
                 
-                del df[c]
                 param_cols.remove(c)
             
             elif len(df[c].unique()) == 1:
-                del df[c]
                 param_cols.remove(c)
                 
         to_log = ['param_min_samples_leaf', 'param_min_samples_split']
@@ -381,13 +391,20 @@ class RFFileDataset(_BaseDataset):
             df[c] = np.log10(df[c].values)
             
         df = df[~df.param_max_features.isnull()].reset_index(drop=True)
-        df = df[['task_id', 'valid_score'] + param_cols]
+        # df = df[['task_id', 'valid_score'] + param_cols]
         
         Xf = df[param_cols].values
+        # # >>
+        # Xf = np.column_stack([
+        #     Xf,
+        #     np.log10(1 + openml100.loc[df.task_id.values][openml_cols].values)
+        # ])
+        # # <<
+        
         df['Xf'] = [tuple(xx) for xx in Xf]
         
         self.x_dim  = Xf.shape[1]
-        self.x_cols = param_cols
+        self.x_cols = param_cols# + openml_cols
         
         return df
     
