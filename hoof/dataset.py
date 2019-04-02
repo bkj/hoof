@@ -60,6 +60,9 @@ class _BaseDataset:
         return x_support, y_support, x_query, y_query, fn
     
     def sample_batch(self, support_size, query_size, batch_size):
+        if isinstance(support_size, list):
+            support_size = int(np.random.uniform(*support_size))
+        
         samples = [self.sample_one(support_size=support_size, query_size=query_size) for _ in range(batch_size)]
         x_support, y_support, x_query, y_query, fn = list(zip(*samples))
         
