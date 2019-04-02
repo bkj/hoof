@@ -348,7 +348,7 @@ class RFFileDataset(_BaseDataset):
         super().__init__(**kwargs)
     
     def _load_data(self, path):
-        df = pd.read_json('data/openml_lt10k.jl', lines=True)
+        df = pd.read_json(path, lines=True)
         df['task_id'] = df.prob_name
         
         params = list(df.config.iloc[0].keys())
@@ -394,7 +394,12 @@ class RFFileDataset(_BaseDataset):
         
         X, y = self.data_dict[task_id]
         
-        sel  = np.random.choice(X.shape[0], support_size + query_size, replace=False)
+        if support_size + query_size > X.shape[0]:
+            print('!! support_size + query_size > X.shape[0]', file=sys.stderr)
+            sel = np.random.permutation(X.shape[0])
+        else:
+            sel = np.random.choice(X.shape[0], support_size + query_size, replace=False)
+        
         X, y = X[sel], y[sel]
         
         X_support, X_query = X[:support_size], X[support_size:]

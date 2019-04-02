@@ -28,14 +28,15 @@ set_seeds(111)
 # --
 # Dataset
 
-path = 'data/openml_l1t10k.jl'
+path = 'data/openml_lt10k.jl'
+# path = '/home/bjohnson/projects/exline/results/rf_bulk/exline1/2048/openml_lt10k.jl'
 train_dataset = RFFileDataset(path=path)
 valid_dataset = RFFileDataset(data=train_dataset.data)
 
 # Non-overlapping tasks
-num_tasks = len(train_dataset.task_ids)
-num_train_tasks = 50
-task_ids  = np.random.permutation(train_dataset.task_ids)
+num_tasks       = len(train_dataset.task_ids)
+num_train_tasks = min(50, int(num_tasks * 0.8))
+task_ids = np.random.permutation(train_dataset.task_ids)
 train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], task_ids[num_train_tasks:]
 
 # --
@@ -44,7 +45,7 @@ train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], tas
 print('x_dim=%d' % train_dataset.x_dim, file=sys.stderr)
 
 model = ALPACA(input_dim=train_dataset.x_dim, output_dim=1, 
-    sig_eps=0.001, hidden_dim=64, activation='relu')
+    sig_eps=0.001, hidden_dim=64, activation='ReLU')
 
 opt = torch.optim.Adam(model.parameters(), lr=1e-3)
 
@@ -58,9 +59,13 @@ model = model.cuda()
 train_mse_history = []
 for lr in [1e-3, 1e-4]:
     set_lr(opt, lr)
-    for support_size in [5, 10, 20]:
-        mse_hist, _ = model.do_train(dataset=train_dataset, opt=opt, 
-            support_size=support_size, **train_kwargs)
+    for support_size in [2, 5, 10, 15]:
+        mse_hist, _ = model.do_train(
+            dataset=train_dataset,
+            opt=opt, 
+            support_size=support_size,
+            **train_kwargs
+        )
         
         train_mse_history += mse_hist
 
@@ -79,7 +84,8 @@ print('final_valid_loss=%f' % np.mean(valid_mse_history), file=sys.stderr)
 # Run BO experiment
 
 def random_search(x_all, y_all, num_candidates=1000):
-    rand_sel  = np.random.choice(x_all.shape[0], num_candidates, replace=True)
+    num_candidates = min(num_candidates, x_all.shape[0])
+    rand_sel  = np.random.choice(x_all.shape[0], num_candidates, replace=False)
     rand_y    = y_all[rand_sel].squeeze()
     return pd.Series(rand_y).cummin().values
 
@@ -92,20 +98,21 @@ def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.0
     for _ in range(num_rounds - burnin_size):
         # !! Simple way to force exploration
         explore = cdist(x_all, x_visited).min(axis=-1) > explore_eps
-        x_cand, y_cand = x_all[explore], y_all[explore]
-        
-        inp = list2tensors((x_visited, y_visited, x_cand), cuda=model.is_cuda)
-        mu, sig, _ = model(*inp)
-        mu, sig = tensors2list((mu, sig), squeeze=True)
-        
-        ei = gaussian_ei(mu, sig, incumbent=y_visited.min())
-        
-        best_idx = ei.argmax()
-        next_x, next_y = x_cand[best_idx], y_cand[best_idx]
-        
-        x_visited = np.vstack([x_visited, next_x])
-        y_visited = np.vstack([y_visited, next_y])
-        
+        if explore.any():
+            x_cand, y_cand = x_all[explore], y_all[explore]
+            
+            inp = list2tensors((x_visited, y_visited, x_cand), cuda=model.is_cuda)
+            mu, sig, _ = model(*inp)
+            mu, sig = tensors2list((mu, sig), squeeze=True)
+            
+            ei = gaussian_ei(mu, sig, incumbent=y_visited.min())
+            
+            best_idx = ei.argmax()
+            next_x, next_y = x_cand[best_idx], y_cand[best_idx]
+            
+            x_visited = np.vstack([x_visited, next_x])
+            y_visited = np.vstack([y_visited, next_y])
+            
         traj = np.hstack([traj, [y_visited.min()]])
     
     return traj
@@ -155,7 +162,7 @@ model   = model.eval()
 dataset = valid_dataset
 
 jobs = []
-for _ in range(120):
+for _ in range(240):
     task_id      = np.random.choice(dataset.task_ids)
     x_all, y_all = dataset.data_dict[task_id]
     
@@ -183,6 +190,7 @@ _ = plt.plot(rand_mean, c='blue', linewidth=3, label='mean(rand)')
 _ = plt.plot(rand_median, c='blue', alpha=0.5, label='median(rand)')
 _ = [plt.plot(xx, alpha=0.01, c='blue') for xx in rand_adj]
 
+# _ = plt.xlim(0, 120)
 _ = plt.legend()
 _ = plt.title('ALPACA-BO vs RANDOM')
 _ = plt.xlabel('iteration')
@@ -190,7 +198,15 @@ _ = plt.ylabel('(opt_score - score) / opt_score')
 _ = plt.yscale('log')
 show_plot()
 
-# On some, scores very good right away
+# Show performance by task
+# task_id = np.random.choice(dataset.task_ids)
+# idxs = np.where([r['task_id'] == task_id for r in res])[0]
+# _ = [plt.plot(- res[idx]['model'], alpha=0.1, c='red') for idx in idxs]
+# _ = [plt.plot(- res[idx]['rand'], alpha=0.1, c='blue') for idx in idxs]
+# _ = plt.xlim(-1, 32)
+# show_plot()
+
+# On some, scores get very good right away (this is more obvious in SVC example)
 # _ = plt.plot(model_median, c='red', label='median(model)')
 # _ = plt.plot(rand_median, c='blue', label='median(rand)')
 # _ = plt.legend()
