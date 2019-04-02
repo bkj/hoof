@@ -112,15 +112,15 @@ class _TrainMixin:
                     query_size=query_size,     # Could sample this horizon for robustness
                 )
             
-            # >>
-            if mixup:
-                lam          = np.random.uniform(0, 1, (x_support.shape[0], 1, 1))
-                pidx         = np.random.permutation(x_support.shape[0])
-                x_support    = lam * x_support + (1 - lam) * x_support[pidx]
-                y_support    = lam * y_support + (1 - lam) * y_support[pidx]
-                x_query      = lam * x_query + (1 - lam) * x_query[pidx]
-                y_query      = lam * y_query + (1 - lam) * y_query[pidx]
-            # <<
+            # # >>
+            # if mixup:
+            #     lam          = np.random.uniform(0, 1, (x_support.shape[0], 1, 1))
+            #     pidx         = np.random.permutation(x_support.shape[0])
+            #     x_support    = lam * x_support + (1 - lam) * x_support[pidx]
+            #     y_support    = lam * y_support + (1 - lam) * y_support[pidx]
+            #     x_query      = lam * x_query + (1 - lam) * x_query[pidx]
+            #     y_query      = lam * y_query + (1 - lam) * y_query[pidx]
+            # # <<
             
             inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
             
