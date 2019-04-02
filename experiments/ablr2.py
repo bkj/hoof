@@ -36,7 +36,7 @@ class Encoder(nn.Module):
             nn.Linear(hidden_dim, hidden_dim),
             nn.Tanh(),
             nn.Linear(hidden_dim, hidden_dim),
-            nn.Tanh(),
+            # nn.Tanh(),
         )
     
     def forward(self, x):
@@ -96,12 +96,12 @@ valid_dataset = dataset_cls()
 def make_dataset(dataset, num_problems):
     problems, fns = [], []
     for _ in range(num_problems):
-        x_s, y_s, x_q, y_q, fn = dataset.sample_one(support_size=5, query_size=5)
+        x_s, y_s, x_q, y_q, fn = dataset.sample_one(support_size=5, query_size=20)
         problems.append([
             torch.Tensor(x_s),
-            torch.Tensor(y_s) + (torch.randn(y_s.shape) * 0.1),
+            torch.Tensor(y_s),
             torch.Tensor(x_q),
-            torch.Tensor(y_q) + (torch.randn(y_q.shape) * 0.1),
+            torch.Tensor(y_q),
         ])
         fns.append(fn)
     
@@ -113,7 +113,8 @@ valid_problems, valid_fns = make_dataset(valid_dataset, 10 * num_problems)
 # >>
 # ALPACA
 
-model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.01, hidden_dim=64, activation='tanh').cuda()
+sig_eps = torch.Tensor([0.01])
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=sig_eps, hidden_dim=64, activation='tanh')
 
 train_history = []
 opt = torch.optim.Adam(model.parameters(), lr=1e-4)
@@ -122,9 +123,8 @@ train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num
 
 train_history += model.train(dataset=train_problems, opt=opt, **train_kwargs)
 
-np.mean(model.valid(dataset=valid_problems))
-
 _ = plt.plot(train_history, c='red', label='train')
+_ = plt.plot(model.valid(dataset=valid_problems), label='valid')
 _ = plt.yscale('log')
 _ = plt.grid()
 _ = plt.legend()
@@ -135,121 +135,107 @@ show_plot()
 # --
 # Setup model
 
-encoder     = Encoder()
-log_alphas  = nn.Parameter(0 + torch.zeros(num_problems)) # prior weight
-log_betas   = nn.Parameter(1 + torch.zeros(num_problems)) # noise variance
+# encoder     = Encoder()
+# log_alphas  = nn.Parameter(0 + torch.zeros(num_problems)) # prior weight
+# log_betas   = nn.Parameter(1 + torch.zeros(num_problems)) # noise variance
 
-params = list(encoder.parameters()) + [log_alphas, log_betas]
-opt    = torch.optim.LBFGS(params, max_iter=100, tolerance_change=1e-4)
+# params = list(encoder.parameters()) + [log_alphas, log_betas]
+# opt    = torch.optim.LBFGS(params, max_iter=100, tolerance_change=1e-4)
+
+# # --
+# # Train
+
+# def _target_fn():
+#     opt.zero_grad()
+    
+#     total_nll, total_mse = 0, 0
+#     for idx, (X, y) in enumerate(train_problems):
+#         alpha, beta = 10 ** log_alphas[idx], 1 / 10 ** log_betas[idx]
+        
+#         phi = encoder(X)
+        
+#         blr = BLR(alpha=alpha, beta=beta)
+#         blr = blr.fit(phi, y)
+#         mu, sig, nll, mse = blr.score_predict(phi, y)
+        
+#         total_nll += nll
+#         total_mse += metrics.mean_squared_error(y.squeeze(), mu.squeeze())
+    
+#     total_nll /= len(train_problems)
+#     total_nll.backward()
+#     nn.utils.clip_grad_norm_(params, max_norm=1)
+    
+#     total_mse /= len(train_problems)
+    
+#     print(float(total_mse), float(total_nll))
+    
+#     return float(total_nll)
+
+
+# _ = opt.step(_target_fn)
+
 
 # --
-# Train
 
-def _target_fn():
-    opt.zero_grad()
+class OBLR(nn.Module):
+    # !! Seems to be most stable version
+    def __init__(self, alpha, sig_eps, input_dim, output_dim):
+        super().__init__()
+        
+        self.alpha   = alpha
+        self.sig_eps = sig_eps
+        
+        self.register_buffer('inp_eye', torch.eye(input_dim))
+        self.register_buffer('out_eye', torch.eye(output_dim))
+        
+        self.input_dim  = input_dim
+        self.output_dim = output_dim
     
-    total_nll, total_mse = 0, 0
-    for idx, (X, y) in enumerate(train_problems):
-        alpha, beta = 10 ** log_alphas[idx], 1 / 10 ** log_betas[idx]
-        
-        phi = encoder(X)
-        
-        blr = BLR(alpha=alpha, beta=beta)
-        blr = blr.fit(phi, y)
-        mu, sig, nll, mse = blr.score_predict(phi, y)
-        
-        total_nll += nll
-        total_mse += metrics.mean_squared_error(y.squeeze(), mu.squeeze())
+    def predict(self, phi):
+        mu  = phi @ self.m
+        sig = self.sig_eps * (1 + ((phi @ self.S) * phi).sum(dim=-1, keepdim=True))
+        return mu, sig
     
-    total_nll /= len(train_problems)
-    total_nll.backward()
-    nn.utils.clip_grad_norm_(params, max_norm=1)
+    def fit(self, phi, y):
+        
+        S_inv_prior = self.alpha * self.inp_eye
+        
+        S_inv   = S_inv_prior + (phi.t() @ phi)
+        S       = torch.inverse(S_inv)
+        m       = S @ (phi.t() @ y)
+        
+        self.S = S
+        self.m = m
+        
+        return self
     
-    total_mse /= len(train_problems)
-    
-    print(float(total_mse), float(total_nll))
-    
-    return float(total_nll)
-
-
-_ = opt.step(_target_fn)
-
-
-# --
-
-# class OBLR(nn.Module):
-#     # !! Seems to be most stable version
-#     def __init__(self, alpha, sig_eps, input_dim, output_dim):
-#         super().__init__()
-        
-#         self.alpha   = alpha
-#         self.sig_eps = sig_eps
-        
-#         self.register_buffer('inp_eye', torch.eye(input_dim))
-#         self.register_buffer('out_eye', torch.eye(output_dim))
-        
-#         self.m_prior   = nn.Parameter(torch.zeros(input_dim, output_dim))
-#         self.S_inv_fac = nn.Parameter(torch.randn(input_dim, input_dim))
-        
-#         torch.nn.init.xavier_uniform_(self.m_prior)
-#         torch.nn.init.xavier_uniform_(self.S_inv_fac)
-        
-#         self.input_dim  = input_dim
-#         self.output_dim = output_dim
-    
-#     def forward(self, phi, y, phi_q, y_q):
-        
-#         try:
-            
-#             S_inv_prior = self.alpha * (self.S_inv_fac @ self.S_inv_fac.t())
-            
-#             S_inv   = S_inv_prior + (phi.t() @ phi)
-#             S       = torch.inverse(S_inv)
-#             m       = S @ (phi.t() @ y + S_inv_prior @ self.m_prior)
-            
-#             mu  = phi_q @ m
-            
-#             sig = self.sig_eps * (1 + ((phi_q @ S) * phi_q).sum(dim=-1, keepdim=True))
-#             sig = sig.clamp(min=1e-6)
-            
-#             nll = ((y_q - mu).pow(2) / sig).mean() + sig.log().mean()
-            
-#             if torch.isnan(nll):
-#                 print('nll null')
-#                 raise Exception
-#         except:
-#             print('phi', phi)
-#             print('(phi.t() @ phi)', (phi.t() @ phi).squeeze())
-#             print('S_inv', S_inv.squeeze())
-#             print('S', S.squeeze())
-#             print('m', m.squeeze())
-#             print('mu', mu.squeeze())
-#             print('sig', sig.squeeze())
-#             raise Exception
-        
-#         return mu, sig, nll
+    def predict_score(self, phi, y):
+        mu, sig = self.predict(phi)
+        nll = ((y - mu).pow(2) / sig.clamp(min=1e-6)).mean() + sig.log().mean()
+        return mu, sig, nll
 
 
 encoder     = Encoder()
 log_alpha   = nn.Parameter(0 + torch.zeros(num_problems)) # prior weight
 log_sig_eps = nn.Parameter(-2 + torch.zeros(num_problems)) # prior weight
 params      = list(encoder.parameters()) + [log_alpha, log_sig_eps]
-opt         = torch.optim.LBFGS(params, max_iter=100, tolerance_change=1e-5)
+opt         = torch.optim.LBFGS(params, max_iter=30, tolerance_change=1e-3)
 
+hist = []
 def _target_fn():
     opt.zero_grad()
     
     total_nll, total_mse = 0, 0
     for idx, (X, y, X_q, y_q) in enumerate(train_problems):
-        phi   = encoder(X)
-        phi_q = encoder(X_q)
+        alpha   = 10 ** log_alpha[idx].clamp(min=-3)
+        sig_eps = 10 ** log_sig_eps[idx].clamp(min=-3)
         
-        # alpha   = 10 ** log_alpha[idx]
-        # sig_eps = 10 ** log_sig_eps[idx]
+        phi = encoder(X)
+        blr = OBLR(alpha=alpha, sig_eps=sig_eps, input_dim=phi.shape[1], output_dim=1)
+        blr = blr.fit(phi, y)
+        mu, sig, nll = blr.predict_score(encoder(X_q), y_q)
         
-        blr          = OBLR(sig_eps=0.1, input_dim=phi.shape[1], output_dim=1)
-        mu, sig, nll = blr(phi[None,...], y[None,...], phi_q[None,...], y_q[None,...])
-        mu, sig      = mu.squeeze(dim=0), sig.squeeze(dim=0)
+        mu, sig = mu.squeeze(dim=0), sig.squeeze(dim=0)
         
         total_nll += nll
         total_mse += metrics.mean_squared_error(y_q.squeeze(), mu.squeeze())
@@ -259,10 +245,65 @@ def _target_fn():
     
     total_mse /= len(train_problems)
     
+    hist.append(total_mse)
+    
     print(float(total_mse), float(total_nll))
     
     return total_nll
 
 _ = opt.step(_target_fn)
+
+# --
+# Validation
+
+mses = []
+for idx, (X, y, X_q, y_q) in enumerate(valid_problems):
+    alpha   = 10 ** log_alpha.clamp(min=-3).mean()
+    sig_eps = 10 ** log_sig_eps.clamp(min=-3).mean()
+    
+    phi = encoder(X)
+    blr = OBLR(alpha=alpha, sig_eps=sig_eps, input_dim=phi.shape[1], output_dim=1)
+    blr = blr.fit(phi, y)
+    mu, sig, _ = blr.predict_score(encoder(X_q), y_q)
+    
+    mu, sig = mu.squeeze(dim=0), sig.squeeze(dim=0)
+    
+    mses.append(metrics.mean_squared_error(y_q.squeeze(), mu.squeeze()))
+
+print(np.mean(mses))
+
+# --
+
+x_s, y_s, _, _, fn = valid_dataset.sample_one(support_size=5, query_size=0)
+
+phi = encoder(torch.Tensor(x_s))
+
+X_grid = torch.linspace(-5, 5, 1000)
+y_grid = fn(X_grid)
+phi_grid = encoder(X_grid.view(-1, 1))
+
+blr = OBLR(alpha=alpha, sig_eps=sig_eps, input_dim=phi.shape[1], output_dim=1)
+blr = blr.fit(phi, torch.Tensor(y_s))
+
+mu_grid, sig_grid = blr.predict(phi_grid)
+mu_grid, sig_grid = to_numpy(mu_grid).squeeze(), to_numpy(sig_grid).squeeze()
+
+_ = plt.scatter(x_s, y_s)
+_ = plt.plot(to_numpy(X_grid), mu_grid)
+_ = plt.plot(to_numpy(X_grid), to_numpy(y_grid))
+_ = plt.fill_between(to_numpy(X_grid), mu_grid - 1.96 * np.sqrt(sig_grid), mu_grid + 1.96 * np.sqrt(sig_grid), alpha=0.2)
+show_plot()
+
+
+
+
+
+
+
+
+
+
+
+
 
 
