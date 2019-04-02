@@ -232,9 +232,14 @@ class QuadraticDataset(_BaseDataset):
 
 
 class SVCFileDataset(_BaseDataset):
-    def __init__(self, path, **kwargs):
+    def __init__(self, path=None, data=None, **kwargs):
+        assert (path is not None) or (data is not None)
         
-        self.data     = self._load_data(path)
+        if path is not None:
+            self.data = self._load_data(path)
+        else:
+            self.data = data.copy()
+        
         self.task_ids = list(set(self.data.task_id))
         
         self.data_dict = {}
@@ -314,5 +319,86 @@ class SVCFileDataset(_BaseDataset):
         return X_support, y_support, X_query, y_query, {"task_id" : task_id}
 
 
+# --
 
+
+class RFFileDataset(_BaseDataset):
+    def __init__(self, path=None, data=None, **kwargs):
+        assert (path is not None) or (data is not None)
+        
+        if path is not None:
+            self.data = self._load_data(path)
+        else:
+            self.data = data.copy()
+        
+        self.task_ids = list(set(self.data.task_id))
+        
+        self.data_dict = {}
+        for task_id in self.task_ids:
+            sub = self.data[self.data.task_id == task_id]
+            
+            X = np.vstack(sub.Xf.values)
+            y = sub.valid_score.values
+            y = y.reshape(-1, 1)
+            
+            y = -1 * y
+            
+            self.data_dict[task_id] = (X, y)
+        
+        super().__init__(**kwargs)
+    
+    def _load_data(self, path):
+        df = pd.read_json('data/openml_lt10k.jl', lines=True)
+        df['task_id'] = df.prob_name
+        
+        params = list(df.config.iloc[0].keys())
+        
+        param_cols = []
+        for p in params:
+            c = 'param_%s' % p
+            df[c] = df.config.apply(lambda x: x.get(p, None))
+            param_cols.append(c)
+            
+        for c in df[param_cols]:
+            if df[c].dtype == np.object:
+                uvals = df[c].unique()
+                for uval in uvals:
+                    df['%s-%s' % (c, uval)] = df[c].apply(lambda x: x == uval).astype(int)
+                    param_cols.append('%s-%s' % (c, uval))
+                
+                del df[c]
+                param_cols.remove(c)
+            
+            elif len(df[c].unique()) == 1:
+                del df[c]
+                param_cols.remove(c)
+                
+        to_log = ['param_min_samples_leaf', 'param_min_samples_split']
+        for c in to_log:
+            df[c] = np.log10(df[c].values)
+            
+        df = df[~df.param_max_features.isnull()].reset_index(drop=True)
+        df = df[['task_id', 'valid_score'] + param_cols]
+        
+        Xf = df[param_cols].values
+        df['Xf'] = [tuple(xx) for xx in Xf]
+        
+        self.x_dim  = Xf.shape[1]
+        self.x_cols = param_cols
+        
+        return df
+    
+    def sample_one(self, support_size, query_size, task_id=None):
+        if task_id is None:
+            task_id = np.random.choice(self.task_ids)
+        
+        X, y = self.data_dict[task_id]
+        
+        sel  = np.random.choice(X.shape[0], support_size + query_size, replace=False)
+        X, y = X[sel], y[sel]
+        
+        X_support, X_query = X[:support_size], X[support_size:]
+        y_support, y_query = y[:support_size], y[support_size:]
+        
+        return X_support, y_support, X_query, y_query, {"task_id" : task_id}
 
