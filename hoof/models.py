@@ -28,10 +28,6 @@ class BLR(nn.Module):
     def __init__(self, sig_eps, input_dim, output_dim):
         super().__init__()
         
-        # !! Should sig_eps be traininable?
-        # !! Notices that not training K or L_asym doesn't make a big difference
-        # !! Is the bias a good idea?
-        
         self.sig_eps     = sig_eps
         self.log_sig_eps = np.log(sig_eps)
         self.register_buffer('sig_eps_eye', torch.eye(output_dim) * self.sig_eps)
@@ -193,12 +189,10 @@ class ALPACA(_TrainMixin, nn.Module):
         self.backbone = nn.Sequential(
             nn.Linear(input_dim, hidden_dim),
             _act(),
-            # BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
             _act(),
-            # BN(hidden_dim),
             nn.Linear(hidden_dim, hidden_dim),
-            _act(), # Do we want this?
+            # _act(), # Do we want this?
         )
         
         self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, output_dim=output_dim)
@@ -212,8 +206,6 @@ class ALPACA(_TrainMixin, nn.Module):
         return next(self.parameters()).is_cuda
     
     def forward(self, x_support, y_support, x_query, y_query=None):
-        # !! POTENTIAL BUG: should be normalizing x_support, y_support, x, and y
-        
         x_support, y_support, x_query, y_query =\
             _check_shapes(x_support, y_support, x_query, y_query, self.input_dim, self.output_dim)
         

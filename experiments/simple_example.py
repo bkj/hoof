@@ -53,7 +53,7 @@ valid_dataset = dataset_cls()
 # --
 # Train
 
-model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='tanh').cuda()
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=1, hidden_dim=128, activation='tanh').cuda()
 
 train_history = []
 lrs = [1e-4, 1e-5]
@@ -61,17 +61,10 @@ opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
 train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
 
-# >>
-train_problems = [train_dataset.sample_one(
-    support_size=train_kwargs['support_size'],
-    query_size=train_kwargs['query_size'],
-) for _ in range(30)]
-# <<
-
 for lr in lrs:
     set_lr(opt, lr)
     
-    train_history += model.do_train(dataset=train_problems, opt=opt, **train_kwargs)
+    train_history += model.do_train(dataset=train_dataset, opt=opt, **train_kwargs)
     
     _ = plt.plot(train_history, c='red', label='train')
     _ = plt.yscale('log')
