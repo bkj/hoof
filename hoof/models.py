@@ -46,11 +46,13 @@ class BLR(nn.Module):
         
         self.register_buffer('eye', torch.eye(output_dim))
         
-        self.m_prior = nn.Parameter(torch.zeros(input_dim, output_dim))
-        self.S_inv_prior_asym = nn.Parameter(torch.randn(input_dim, input_dim))
+        self.m_prior          = nn.Parameter(torch.zeros(input_dim, output_dim))
+        self.S_inv_prior_asym = nn.Parameter(torch.eye(input_dim))
         
-        torch.nn.init.xavier_uniform_(self.m_prior)
-        torch.nn.init.xavier_uniform_(self.S_inv_prior_asym)
+        # !! Why are these initialized like this?
+        # Makes sense that prior should be close to zero
+        # torch.nn.init.xavier_uniform_(self.m_prior)
+        # torch.nn.init.xavier_uniform_(self.S_inv_prior_asym)
         
         self.input_dim  = input_dim
         self.output_dim = output_dim

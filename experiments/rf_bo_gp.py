@@ -176,6 +176,8 @@ print('final_train_nll=%f' % np.mean(train_nll_history[-100:]), file=sys.stderr)
 print('final_valid_mse=%f' % np.mean(valid_mse_history), file=sys.stderr)
 print('final_valid_nll=%f' % np.mean(valid_nll_history), file=sys.stderr)
 
+raise Exception
+
 # --
 # Run BO experiment
 
