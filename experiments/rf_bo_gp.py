@@ -104,8 +104,8 @@ for c in gp_param_cols:
         dimensions.append(uvals)
     else:
         dimensions.append((
-            0.99 * X_gp[c].min(),
-            1.01 * X_gp[c].max(),
+            X_gp[c].min(),
+            X_gp[c].max(),
         ))
 
 task_ids = valid_dataset.task_ids
@@ -183,7 +183,7 @@ def random_search(x_all, y_all, num_candidates=1000):
     num_candidates = min(num_candidates, x_all.shape[0])
     rand_sel  = np.random.choice(x_all.shape[0], num_candidates, replace=False)
     rand_y    = y_all[rand_sel].squeeze()
-    return cumming(rand_y)
+    return cummin(rand_y)
 
 
 def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.001, acq='ei', adjust_alpha=False):
@@ -293,7 +293,7 @@ def agg_and_plot(res, name, c='black', mode='abs'):
 model_adj = agg_and_plot(res, name='model', c='red', mode='abs')
 alpha_adj = agg_and_plot(res, name='alpha', c='purple', mode='abs')
 rand_adj  = agg_and_plot(res, name='rand', c='blue', mode='abs')
-gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='abs')
+# gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='abs')
 
 _ = plt.legend()
 _ = plt.ylim(1e-5, 1)
@@ -309,7 +309,7 @@ show_plot()
 model_adj = agg_and_plot(res, name='model', c='red', mode='percentile')
 alpha_adj = agg_and_plot(res, name='alpha', c='purple', mode='percentile')
 rand_adj  = agg_and_plot(res, name='rand', c='blue', mode='percentile')
-gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='percentile')
+# gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='percentile')
 
 _ = plt.legend()
 _ = plt.title('ALPACA-BO vs RANDOM')
