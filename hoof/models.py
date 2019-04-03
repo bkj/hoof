@@ -6,6 +6,16 @@
     Based on:
         https://arxiv.org/pdf/1807.08912.pdf
         https://github.com/StanfordASL/ALPaCA/blob/master/main/alpaca.py
+
+    # Per Murphy "Machine Learning: A probabalistic perspective", BLR
+    # 1) Should have 1 / sig_eps factor for every phi_support.transpose(1, 2)
+    # 2) And should be 
+    #       spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
+    # 3) And _sig_logdet should be updated
+    # I think that not including this mean the priors get weighted in a non-standard way
+    # Maybe that's good?  Maybe it's bad?
+    # NLL is also missing a k * log(2 * pi) term, so it's not comparable
+    # across dimensions
 """
 
 import sys
@@ -25,48 +35,53 @@ from hoof.helpers import HoofMetrics as metrics
 # Bayesian Linear Regression
 
 class BLR(nn.Module):
-    def __init__(self, sig_eps, input_dim, output_dim):
+    def __init__(self, sig_eps, input_dim, output_dim, train_sig_eps=False):
         super().__init__()
         
-        self.sig_eps     = sig_eps
-        self.log_sig_eps = np.log(sig_eps)
-        self.register_buffer('sig_eps_eye', torch.eye(output_dim) * self.sig_eps)
+        sig_eps = torch.Tensor([sig_eps])
+        if train_sig_eps:
+            self.sig_eps = nn.Parameter(sig_eps)
+        else:
+            self.register_buffer('sig_eps', sig_eps)
         
-        self.K      = nn.Parameter(torch.zeros(input_dim, output_dim))
-        self.L_asym = nn.Parameter(torch.randn(input_dim, input_dim))
-        self.bias   = nn.Parameter(torch.zeros([1]))
+        self.register_buffer('eye', torch.eye(output_dim))
         
-        torch.nn.init.xavier_uniform_(self.K)
-        torch.nn.init.xavier_uniform_(self.L_asym)
+        self.m_prior = nn.Parameter(torch.zeros(input_dim, output_dim))
+        self.S_inv_prior_asym = nn.Parameter(torch.randn(input_dim, input_dim))
+        
+        torch.nn.init.xavier_uniform_(self.m_prior)
+        torch.nn.init.xavier_uniform_(self.S_inv_prior_asym)
         
         self.input_dim  = input_dim
         self.output_dim = output_dim
+        
+        self.alpha = 1
     
     def forward(self, phi_support, y_support, phi_query, y_query=None):
-        L = self.L_asym @ self.L_asym.t()
+        S_inv_prior = self.alpha * self.S_inv_prior_asym @ self.S_inv_prior_asym.t()
+        m_prior     = S_inv_prior @ self.m_prior
         
         nobs = phi_support.shape[1]
         if (nobs > 0):
-            posterior_L     = (phi_support.transpose(1, 2) @ phi_support) + L[None,:]
-            posterior_L_inv = torch.inverse(posterior_L)
-            posterior_K     = posterior_L_inv @ ((phi_support.transpose(1, 2) @ y_support) + (L @ self.K))
+            S_inv = (phi_support.transpose(1, 2) @ phi_support) + S_inv_prior[None,:]
+            S     = torch.inverse(S_inv)
+            m     = S @ ((phi_support.transpose(1, 2) @ y_support) + m_prior)
         else:
-            posterior_L_inv = torch.inverse(L[None,:]).repeat(phi_query.shape[0], 1, 1)
-            posterior_K     = self.K[None,:]
+            S = torch.inverse(S_inv_prior[None,:]).repeat(phi_query.shape[0], 1, 1)
+            m = self.m_prior[None,:]
         
-        mu_pred = phi_query @ posterior_K + self.bias
+        mu = phi_query @ m
         
-        spread_fac = 1 + self._batch_quadform1(posterior_L_inv, phi_query)
+        spread_fac = 1 + self._batch_quadform1(S, phi_query)
+        sig        = torch.einsum('...i,jk->...ijk', spread_fac, self.eye * self.sig_eps)
         
-        # Expand each element of spread_fac to y_dim diagonal matrix
-        sig_pred = torch.einsum('...i,jk->...ijk', spread_fac, self.sig_eps_eye)
-        
-        predictive_nll = None
+        nll = None
         if y_query is not None:
-            quadf = self._batch_quadform2(torch.inverse(sig_pred), y_query - mu_pred)
-            predictive_nll = self._sig_pred_logdet(spread_fac).mean() + quadf.mean()
+            logdet = self._sig_logdet(spread_fac)
+            quadf  = self._batch_quadform2(torch.inverse(sig), y_query - mu)
+            nll    = logdet.mean() + quadf.mean()
         
-        return mu_pred, sig_pred, predictive_nll
+        return mu, sig, nll
     
     def _batch_quadform1(self, A, b):
         # Eq 8 helper
@@ -78,19 +93,30 @@ class BLR(nn.Module):
         # Eq 10 helper
         return torch.einsum('...i,...ij,...j->...', b, A, b)
     
-    def _sig_pred_logdet(self, spread_fac):
-        # Compute logdet(sig_pred)
-        # Equivalent to [[ss.logdet() for ss in s] for s in sig_pred]
-        return self.output_dim * (spread_fac.log() + self.log_sig_eps)
+    def _sig_logdet(self, spread_fac):
+        # Compute logdet(sig)
+        # Equivalent to [[ss.logdet() for ss in s] for s in sig]
+        return self.output_dim * (spread_fac.log() + torch.log(self.sig_eps))
+
 
 # --
 # NN Helper
+
+def mixup(x_support, y_support, x_query, y_query):
+    lam          = np.random.uniform(0, 1, (x_support.shape[0], 1, 1))
+    pidx         = np.random.permutation(x_support.shape[0])
+    x_support    = lam * x_support + (1 - lam) * x_support[pidx]
+    y_support    = lam * y_support + (1 - lam) * y_support[pidx]
+    x_query      = lam * x_query + (1 - lam) * x_query[pidx]
+    y_query      = lam * y_query + (1 - lam) * y_query[pidx]
+    return x_support, y_support, x_query, y_query
+
 
 class _TrainMixin:
     def _run_loop(self, dataset, opt, batch_size=10, support_size=5, query_size=5, num_samples=100, 
         metric_fn=metrics.mean_squared_error, mixup=False):
         
-        hist = []
+        mse_hist, nll_hist = [], []
         gen = trange(num_samples // batch_size)
         for batch_idx in gen:
             if isinstance(dataset, list):
@@ -108,15 +134,8 @@ class _TrainMixin:
                     query_size=query_size,     # Could sample this horizon for robustness
                 )
             
-            # # >>
-            # if mixup:
-            #     lam          = np.random.uniform(0, 1, (x_support.shape[0], 1, 1))
-            #     pidx         = np.random.permutation(x_support.shape[0])
-            #     x_support    = lam * x_support + (1 - lam) * x_support[pidx]
-            #     y_support    = lam * y_support + (1 - lam) * y_support[pidx]
-            #     x_query      = lam * x_query + (1 - lam) * x_query[pidx]
-            #     y_query      = lam * y_query + (1 - lam) * y_query[pidx]
-            # # <<
+            if mixup:
+                x_support, y_support, x_query, y_query = mixup(x_support, y_support, x_query, y_query)
             
             inp = list2tensors((x_support, y_support, x_query, y_query), cuda=self.is_cuda)
             
@@ -129,12 +148,19 @@ class _TrainMixin:
                 with torch.no_grad():
                     mu, sig, loss = self(*inp)
             
-            hist.append(metric_fn(y_query, to_numpy(mu)))
+            nll_hist.append(float(loss))
+            mse_hist.append(metric_fn(y_query, to_numpy(mu)))
             
             if not batch_idx % 10:
-                gen.set_postfix(loss='%0.8f' % np.mean(hist[-10:]))
-            
-        return hist
+                gen.set_postfix(
+                    mse='%0.8f' % np.mean(mse_hist[-10:]),
+                    nll='%0.8f' % np.mean(nll_hist[-10:]),
+                )
+        
+        self.nll_hist = np.array(nll_hist)
+        self.mse_hist = np.array(mse_hist)
+        
+        return mse_hist, nll_hist
     
     def do_train(self, dataset, opt, **kwargs):
         _ = self.train()
@@ -175,27 +201,44 @@ class BN(nn.Module):
         return x
 
 
+class Block(nn.Module):
+    def __init__(self, input_dim, output_dim, act, bn=True, skip=False):
+        super().__init__()
+        self.linear = nn.Linear(input_dim, output_dim)
+        self.act    = act()
+        self.bn     = BN(output_dim) if bn else None
+        self.skip   = skip
+    
+    def forward(self, x_inp):
+        x = self.linear(x_inp)
+        
+        if self.bn:
+            x = self.bn(x)
+        
+        x = self.act(x)
+        
+        if self.skip:
+            x = x + x_inp
+        
+        return x
+
+
 class ALPACA(_TrainMixin, nn.Module):
-    def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='tanh', hidden_dim=128):
+    def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='Tanh', 
+        hidden_dim=128, train_sig_eps=False):
+        
         super().__init__()
         
-        if activation == 'tanh':
-            _act = nn.Tanh
-        elif activation  == 'relu':
-            _act = nn.ReLU
-        else:
-            raise Exception('!! unknown activation %s' % activation)
+        _act = getattr(nn, activation)
         
         self.backbone = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            _act(),
-            nn.Linear(hidden_dim, hidden_dim),
-            _act(),
-            nn.Linear(hidden_dim, hidden_dim),
-            # _act(), # Do we want this?
+            Block(input_dim, hidden_dim, _act, bn=True),
+            Block(hidden_dim, hidden_dim, _act, bn=True, skip=False),
+            Block(hidden_dim, hidden_dim, _act, bn=True, skip=False),
         )
         
-        self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, output_dim=output_dim)
+        self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, 
+            output_dim=output_dim, train_sig_eps=train_sig_eps)
         
         self.num        = num
         self.input_dim  = input_dim
@@ -222,3 +265,71 @@ def rks_regression(x_s, y_s, x_grid, **kwargs):
     p_s = rbf.fit_transform(x_s)
     lr  = LinearRegression().fit(p_s, y_s)
     return lr.predict(rbf.transform(x_grid))
+
+
+
+# --
+# Alternate BLR
+
+# class BLR(nn.Module):
+#     def __init__(self, sig_eps, input_dim, output_dim, train_sig_eps=False):
+#         super().__init__()
+        
+#         sig_eps = 10 ** torch.Tensor([sig_eps])
+#         if train_sig_eps:
+#             self.sig_eps = nn.Parameter(sig_eps)
+#         else:
+#             self.register_buffer('sig_eps', sig_eps)
+        
+#         self.register_buffer('eye', torch.eye(output_dim))
+        
+#         self.m_prior = nn.Parameter(torch.zeros(input_dim, output_dim))
+#         self.S_inv_prior_asym = nn.Parameter(torch.randn(input_dim, input_dim))
+        
+#         torch.nn.init.xavier_uniform_(self.m_prior)
+#         torch.nn.init.xavier_uniform_(self.S_inv_prior_asym)
+        
+#         self.input_dim  = input_dim
+#         self.output_dim = output_dim
+        
+#         self.alpha = 1
+    
+#     def forward(self, phi_support, y_support, phi_query, y_query=None):
+#         # !! Control s_inv and m_prior weight separately?
+#         S_inv_prior = self.alpha * self.S_inv_prior_asym @ self.S_inv_prior_asym.t()
+#         m_prior     = S_inv_prior @ self.m_prior
+        
+#         nobs = phi_support.shape[1]
+#         if (nobs > 0):
+#             S_inv = (1 / self.sig_eps * phi_support.transpose(1, 2) @ phi_support) + S_inv_prior[None,:]
+#             S     = torch.inverse(S_inv)
+#             m     = S @ (1 / self.sig_eps * phi_support.transpose(1, 2) @ y_support + m_prior)
+#         else:
+#             S = torch.inverse(S_inv_prior[None,:]).repeat(phi_query.shape[0], 1, 1)
+#             m = self.m_prior[None,:]
+        
+#         mu = phi_query @ m
+        
+#         spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
+#         sig        = torch.einsum('...i,jk->...ijk', spread_fac, self.eye)
+        
+#         predictive_nll = None
+#         if y_query is not None:
+#             quadf = self._batch_quadform2(torch.inverse(sig), y_query - mu)
+#             predictive_nll = self._sig_logdet(spread_fac).mean() + quadf.mean()
+        
+#         return mu, sig, predictive_nll
+    
+#     def _batch_quadform1(self, A, b):
+#         # Eq 8 helper
+#         #   Also equivalent to: ((b @ A) * b).sum(dim=-1)
+#         return torch.einsum('...ij,...jk,...ik->...i', b, A, b)
+    
+#     def _batch_quadform2(self, A, b):
+#         # Eq 10 helper
+#         return torch.einsum('...i,...ij,...j->...', b, A, b)
+    
+#     def _sig_logdet(self, spread_fac):
+#         # Compute logdet(sig)
+#         # Equivalent to [[ss.logdet() for ss in s] for s in sig]
+#         return self.output_dim * spread_fac.log()

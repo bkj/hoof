@@ -53,30 +53,34 @@ valid_dataset = dataset_cls()
 # --
 # Train
 
-model = ALPACA(input_dim=1, output_dim=1, sig_eps=1, hidden_dim=128, activation='tanh').cuda()
+model = ALPACA(input_dim=1, output_dim=1, sig_eps=0.1, hidden_dim=128, activation='Tanh').cuda()
+opt   = torch.optim.Adam(model.parameters())
 
-train_history = []
+train_hist_mse, train_hist_nll = [], []
 lrs = [1e-4, 1e-5]
-opt = torch.optim.Adam(model.parameters(), lr=lrs[0])
 
-train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 30000}
+train_kwargs = {"batch_size" : 64, "support_size" : 10, "query_size" : 100, "num_samples" : 50000}
 
 for lr in lrs:
     set_lr(opt, lr)
     
-    train_history += model.do_train(dataset=train_dataset, opt=opt, **train_kwargs)
+    mse, nll = model.do_train(dataset=train_dataset, opt=opt, **train_kwargs)
+    train_hist_mse += mse
+    train_hist_nll += nll
     
-    _ = plt.plot(train_history, c='red', label='train')
+    _ = plt.plot(train_hist_mse, c='red', label='train')
     _ = plt.yscale('log')
     _ = plt.grid()
     _ = plt.legend()
     show_plot()
 
 
-valid_history = model.do_valid(dataset=valid_dataset, **train_kwargs)
+valid_hist_mse, valid_hist_nll = model.do_valid(dataset=valid_dataset, **train_kwargs)
 
-print('final_train_loss=%f' % np.mean(train_history[-100:]), file=sys.stderr)
-print('final_valid_loss=%f' % np.mean(valid_history[-100:]), file=sys.stderr)
+print('train_hist_mse=%f' % np.mean(train_hist_mse[-100:]), file=sys.stderr)
+print('train_hist_nll=%f' % np.mean(train_hist_nll[-100:]), file=sys.stderr)
+print('valid_hist_mse=%f' % np.mean(valid_hist_mse), file=sys.stderr)
+print('valid_hist_nll=%f' % np.mean(valid_hist_nll), file=sys.stderr)
 
 # --
 # Plot example
