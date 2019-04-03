@@ -6,6 +6,16 @@
     Based on:
         https://arxiv.org/pdf/1807.08912.pdf
         https://github.com/StanfordASL/ALPaCA/blob/master/main/alpaca.py
+
+    # Per Murphy "Machine Learning: A probabalistic perspective", BLR
+    # 1) Should have 1 / sig_eps factor for every phi_support.transpose(1, 2)
+    # 2) And should be 
+    #       spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
+    # 3) And _sig_logdet should be updated
+    # I think that not including this mean the priors get weighted in a non-standard way
+    # Maybe that's good?  Maybe it's bad?
+    # NLL is also missing a k * log(2 * pi) term, so it's not comparable
+    # across dimensions
 """
 
 import sys
@@ -88,13 +98,6 @@ class BLR(nn.Module):
         # Equivalent to [[ss.logdet() for ss in s] for s in sig]
         return self.output_dim * (spread_fac.log() + torch.log(self.sig_eps))
 
-# Per Murphy "Machine Learning: A probabalistic perspective"
-# 1) Should have 1 / sig_eps factor for every phi_support.transpose(1, 2)
-# 2) And should be 
-#       spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
-# 3) And _sig_logdet should be updated
-# I think that not including this mean the priors get weighted in a non-standard way
-# Maybe that's good?  Maybe it's bad?
 
 # --
 # NN Helper
@@ -212,7 +215,9 @@ class Block(nn.Module):
             return x
 
 class ALPACA(_TrainMixin, nn.Module):
-    def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='Tanh', hidden_dim=128):
+    def __init__(self, input_dim, output_dim, sig_eps, num=1, activation='Tanh', 
+        hidden_dim=128, train_sig_eps=False):
+        
         super().__init__()
         
         _act = getattr(nn, activation)
@@ -223,7 +228,8 @@ class ALPACA(_TrainMixin, nn.Module):
             Block(hidden_dim, hidden_dim, _act, skip=False),
         )
         
-        self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, output_dim=output_dim)
+        self.blr = BLR(sig_eps=sig_eps, input_dim=hidden_dim, 
+            output_dim=output_dim, train_sig_eps=train_sig_eps)
         
         self.num        = num
         self.input_dim  = input_dim
@@ -250,3 +256,71 @@ def rks_regression(x_s, y_s, x_grid, **kwargs):
     p_s = rbf.fit_transform(x_s)
     lr  = LinearRegression().fit(p_s, y_s)
     return lr.predict(rbf.transform(x_grid))
+
+
+
+# --
+# Alternate BLR
+
+# class BLR(nn.Module):
+#     def __init__(self, sig_eps, input_dim, output_dim, train_sig_eps=False):
+#         super().__init__()
+        
+#         sig_eps = 10 ** torch.Tensor([sig_eps])
+#         if train_sig_eps:
+#             self.sig_eps = nn.Parameter(sig_eps)
+#         else:
+#             self.register_buffer('sig_eps', sig_eps)
+        
+#         self.register_buffer('eye', torch.eye(output_dim))
+        
+#         self.m_prior = nn.Parameter(torch.zeros(input_dim, output_dim))
+#         self.S_inv_prior_asym = nn.Parameter(torch.randn(input_dim, input_dim))
+        
+#         torch.nn.init.xavier_uniform_(self.m_prior)
+#         torch.nn.init.xavier_uniform_(self.S_inv_prior_asym)
+        
+#         self.input_dim  = input_dim
+#         self.output_dim = output_dim
+        
+#         self.alpha = 1
+    
+#     def forward(self, phi_support, y_support, phi_query, y_query=None):
+#         # !! Control s_inv and m_prior weight separately?
+#         S_inv_prior = self.alpha * self.S_inv_prior_asym @ self.S_inv_prior_asym.t()
+#         m_prior     = S_inv_prior @ self.m_prior
+        
+#         nobs = phi_support.shape[1]
+#         if (nobs > 0):
+#             S_inv = (1 / self.sig_eps * phi_support.transpose(1, 2) @ phi_support) + S_inv_prior[None,:]
+#             S     = torch.inverse(S_inv)
+#             m     = S @ (1 / self.sig_eps * phi_support.transpose(1, 2) @ y_support + m_prior)
+#         else:
+#             S = torch.inverse(S_inv_prior[None,:]).repeat(phi_query.shape[0], 1, 1)
+#             m = self.m_prior[None,:]
+        
+#         mu = phi_query @ m
+        
+#         spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
+#         sig        = torch.einsum('...i,jk->...ijk', spread_fac, self.eye)
+        
+#         predictive_nll = None
+#         if y_query is not None:
+#             quadf = self._batch_quadform2(torch.inverse(sig), y_query - mu)
+#             predictive_nll = self._sig_logdet(spread_fac).mean() + quadf.mean()
+        
+#         return mu, sig, predictive_nll
+    
+#     def _batch_quadform1(self, A, b):
+#         # Eq 8 helper
+#         #   Also equivalent to: ((b @ A) * b).sum(dim=-1)
+#         return torch.einsum('...ij,...jk,...ik->...i', b, A, b)
+    
+#     def _batch_quadform2(self, A, b):
+#         # Eq 10 helper
+#         return torch.einsum('...i,...ij,...j->...', b, A, b)
+    
+#     def _sig_logdet(self, spread_fac):
+#         # Compute logdet(sig)
+#         # Equivalent to [[ss.logdet() for ss in s] for s in sig]
+#         return self.output_dim * spread_fac.log()

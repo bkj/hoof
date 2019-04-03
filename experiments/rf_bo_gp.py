@@ -40,88 +40,88 @@ num_train_tasks = min(50, int(num_tasks * 0.8))
 task_ids = np.random.permutation(train_dataset.task_ids)
 train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], task_ids[num_train_tasks:]
 
-# >>
+# # >>
 
-from skopt import Optimizer
+# from skopt import Optimizer
 
-df = valid_dataset.data
+# df = valid_dataset.data
 
-gp_param_cols = [
-    "param_class_weight",
-    "param_estimator",
-    "param_max_features",
-    "param_min_samples_leaf",
-    "param_min_samples_split",
-]
-X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
-X_gp.valid_score = - X_gp.valid_score
+# gp_param_cols = [
+#     "param_class_weight",
+#     "param_estimator",
+#     "param_max_features",
+#     "param_min_samples_leaf",
+#     "param_min_samples_split",
+# ]
+# X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
+# X_gp.valid_score = - X_gp.valid_score
 
-X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
+# X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
 
-dimensions = []
-for c in gp_param_cols:
-    if X_gp[c].dtype == np.object_:
-        uvals = list(np.unique(X_gp[c]))
-        dimensions.append(uvals)
-    else:
-        dimensions.append((
-            0.99 * X_gp[c].min(),
-            1.01 * X_gp[c].max()
-        ))
+# dimensions = []
+# for c in gp_param_cols:
+#     if X_gp[c].dtype == np.object_:
+#         uvals = list(np.unique(X_gp[c]))
+#         dimensions.append(uvals)
+#     else:
+#         dimensions.append((
+#             0.99 * X_gp[c].min(),
+#             1.01 * X_gp[c].max()
+#         ))
 
 
-def cummin(x):
-    return pd.Series(x).cummin().values
+# def cummin(x):
+#     return pd.Series(x).cummin().values
 
-def _run_one_gp(task_id, sub, max_steps=40):
-    X_cand = [list(xx) for xx in sub[gp_param_cols].values]
-    lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
+# def _run_one_gp(task_id, sub, max_steps=40):
+#     X_cand = [list(xx) for xx in sub[gp_param_cols].values]
+#     lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
     
-    y_opt  = sub.valid_score.min()
+#     y_opt  = sub.valid_score.min()
     
-    opt = Optimizer(
-        dimensions=dimensions,
-        base_estimator="GP",
-        n_initial_points=3,
-        acq_func="EI",
-        acq_optimizer="sampling"
-    )
+#     opt = Optimizer(
+#         dimensions=dimensions,
+#         base_estimator="GP",
+#         n_initial_points=3,
+#         acq_func="EI",
+#         acq_optimizer="sampling"
+#     )
     
-    opt._X_cand = X_cand
+#     opt._X_cand = X_cand
     
-    traj = []
-    t    = time()
-    for iteration in range(max_steps):
-        if len(traj) and (np.min(traj) == y_opt):
-            # If we've already found the best, just exit early
-            next_y = np.min(traj)
-        else:
-            next_x = opt.ask()
-            opt._X_cand.remove(next_x) # !! Never revisit
-            next_y = lookup[tuple(next_x)]
-            _ = opt.tell(next_x, next_y)
+#     traj = []
+#     t    = time()
+#     for iteration in range(max_steps):
+#         if len(traj) and (np.min(traj) == y_opt):
+#             # If we've already found the best, just exit early
+#             next_y = np.min(traj)
+#         else:
+#             next_x = opt.ask()
+#             opt._X_cand.remove(next_x) # !! Never revisit
+#             next_y = lookup[tuple(next_x)]
+#             _ = opt.tell(next_x, next_y)
         
-        traj.append(next_y)
+#         traj.append(next_y)
     
-    return {
-        "task_id"    : task_id,
-        "opt"        : y_opt,
-        "gp"         : cummin(traj),
-        "gp_elapsed" : time() - t
-    }
+#     return {
+#         "task_id"    : task_id,
+#         "opt"        : y_opt,
+#         "gp"         : cummin(traj),
+#         "gp_elapsed" : time() - t
+#     }
 
 
-task_ids = valid_dataset.task_ids
+# task_ids = valid_dataset.task_ids
 
-jobs = []
-for _ in range(180):
-    task_id  = np.random.choice(task_ids)
-    sub      = X_gp[X_gp.task_id == task_id]
-    jobs.append(delayed(_run_one_gp)(task_id, sub))
+# jobs = []
+# for _ in range(180):
+#     task_id  = np.random.choice(task_ids)
+#     sub      = X_gp[X_gp.task_id == task_id]
+#     jobs.append(delayed(_run_one_gp)(task_id, sub))
 
-gp_res = Parallel(n_jobs=60, backend='multiprocessing', verbose=10)(jobs)
+# gp_res = Parallel(n_jobs=60, backend='multiprocessing', verbose=10)(jobs)
 
-# <<
+# # <<
 
 # --
 # Train
@@ -131,7 +131,7 @@ print('x_dim=%d' % train_dataset.x_dim, file=sys.stderr)
 model = ALPACA(
     input_dim=train_dataset.x_dim,
     output_dim=1,
-    sig_eps=0.001,
+    sig_eps=1e-3,
     hidden_dim=128,
     activation='ReLU'
 )
@@ -261,7 +261,7 @@ dataset = valid_dataset
 
 jobs = []
 num_valid_tasks = len(dataset.task_ids)
-for _ in range(18):
+for _ in range(6):
     for task_id in dataset.task_ids:
         x_all, y_all = dataset.data_dict[task_id]
         job = delayed(_run_one_bo)(task_id, x_all, y_all)
