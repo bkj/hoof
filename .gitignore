@@ -1,3 +1,4 @@
 tmp.png
 __pycache__*
 *.egg-info/*
+experiments/data/openml_lt10k.jl
