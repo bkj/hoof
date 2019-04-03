@@ -7,6 +7,7 @@
 
 import torch
 import numpy as np
+import pandas as pd
 
 def to_numpy(x):
     if isinstance(x, np.ndarray):
@@ -36,6 +37,9 @@ def tensors2list(xs, squeeze=False):
 def set_lr(opt, lr):
     for p in opt.param_groups:
         p['lr'] = lr
+
+def cummin(x):
+    return pd.Series(x).cummin().values
 
 # --
 # Metrics

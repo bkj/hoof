@@ -9,19 +9,21 @@ from matplotlib import pyplot as plt
 
 import sys
 import numpy as np
-import pandas as pd
 from time import time
+from copy import deepcopy
 from tqdm import tqdm, trange
 from scipy.spatial.distance import cdist
 from joblib import Parallel, delayed
 
+from skopt import Optimizer
+
 import torch
 from torch import nn
 
-from hoof.dataset import RFFileDataset
 from hoof.models import ALPACA
-from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
+from hoof.dataset import RFFileDataset
 from hoof.bayesopt import gaussian_ei
+from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr, cummin
 
 torch.set_num_threads(2)
 set_seeds(222)
@@ -29,8 +31,7 @@ set_seeds(222)
 # --
 # Dataset
 
-path = 'data/openml_lt10k.jl'
-# path = '/home/bjohnson/projects/exline/results/rf_bulk/exline1/2048/openml_lt10k.jl'
+path          = 'data/openml_lt10k.jl'
 train_dataset = RFFileDataset(path=path)
 valid_dataset = RFFileDataset(data=train_dataset.data)
 
@@ -40,88 +41,87 @@ num_train_tasks = min(50, int(num_tasks * 0.8))
 task_ids = np.random.permutation(train_dataset.task_ids)
 train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], task_ids[num_train_tasks:]
 
-# # >>
+# --
+# Run GP BO baseline
 
-# from skopt import Optimizer
-
-# df = valid_dataset.data
-
-# gp_param_cols = [
-#     "param_class_weight",
-#     "param_estimator",
-#     "param_max_features",
-#     "param_min_samples_leaf",
-#     "param_min_samples_split",
-# ]
-# X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
-# X_gp.valid_score = - X_gp.valid_score
-
-# X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
-
-# dimensions = []
-# for c in gp_param_cols:
-#     if X_gp[c].dtype == np.object_:
-#         uvals = list(np.unique(X_gp[c]))
-#         dimensions.append(uvals)
-#     else:
-#         dimensions.append((
-#             0.99 * X_gp[c].min(),
-#             1.01 * X_gp[c].max()
-#         ))
-
-
-# def cummin(x):
-#     return pd.Series(x).cummin().values
-
-# def _run_one_gp(task_id, sub, max_steps=40):
-#     X_cand = [list(xx) for xx in sub[gp_param_cols].values]
-#     lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
+def _run_one_gp(task_id, sub, dimensions, max_steps=40):
+    X_cand = [list(xx) for xx in sub[gp_param_cols].values]
+    lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
     
-#     y_opt  = sub.valid_score.min()
+    y_opt  = sub.valid_score.min()
     
-#     opt = Optimizer(
-#         dimensions=dimensions,
-#         base_estimator="GP",
-#         n_initial_points=3,
-#         acq_func="EI",
-#         acq_optimizer="sampling"
-#     )
+    opt = Optimizer(
+        dimensions=dimensions,
+        base_estimator="GP",
+        n_initial_points=3,
+        acq_func="EI",
+        acq_optimizer="sampling"
+    )
     
-#     opt._X_cand = X_cand
+    opt._X_cand = X_cand
     
-#     traj = []
-#     t    = time()
-#     for iteration in range(max_steps):
-#         if len(traj) and (np.min(traj) == y_opt):
-#             # If we've already found the best, just exit early
-#             next_y = np.min(traj)
-#         else:
-#             next_x = opt.ask()
-#             opt._X_cand.remove(next_x) # !! Never revisit
-#             next_y = lookup[tuple(next_x)]
-#             _ = opt.tell(next_x, next_y)
+    traj = []
+    t    = time()
+    for iteration in range(max_steps):
+        if len(traj) and (np.min(traj) == y_opt):
+            # If we've already found the best, just exit early
+            next_y = np.min(traj)
+        else:
+            next_x = opt.ask()
+            opt._X_cand.remove(next_x) # !! Never revisit
+            next_y = lookup[tuple(next_x)]
+            _ = opt.tell(next_x, next_y)
         
-#         traj.append(next_y)
+        traj.append(next_y)
     
-#     return {
-#         "task_id"    : task_id,
-#         "opt"        : y_opt,
-#         "gp"         : cummin(traj),
-#         "gp_elapsed" : time() - t
-#     }
+    return {
+        "task_id"    : task_id,
+        "opt"        : y_opt,
+        "gp"         : cummin(traj),
+        "gp_elapsed" : time() - t
+    }
 
 
-# task_ids = valid_dataset.task_ids
+df = valid_dataset.data
 
-# jobs = []
-# for _ in range(180):
-#     task_id  = np.random.choice(task_ids)
-#     sub      = X_gp[X_gp.task_id == task_id]
-#     jobs.append(delayed(_run_one_gp)(task_id, sub))
+gp_param_cols = [
+    "param_class_weight",
+    "param_estimator",
+    "param_max_features",
+    "param_min_samples_leaf",
+    "param_min_samples_split",
+]
+X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
 
+X_gp.valid_score        = -1 *  X_gp.valid_score
+X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
+
+# Define search space
+dimensions = []
+for c in gp_param_cols:
+    if X_gp[c].dtype == np.object_:
+        uvals = list(np.unique(X_gp[c]))
+        dimensions.append(uvals)
+    else:
+        dimensions.append((
+            0.99 * X_gp[c].min(),
+            1.01 * X_gp[c].max(),
+        ))
+
+task_ids = valid_dataset.task_ids
+
+jobs = []
+for _ in range(180):
+    task_id  = np.random.choice(task_ids)
+    sub      = X_gp[X_gp.task_id == task_id]
+    jobs.append(delayed(_run_one_gp)(
+        task_id=task_id,
+        sub=sub,
+        dimensions=dimensions
+    ))
+
+# !! Slow
 # gp_res = Parallel(n_jobs=60, backend='multiprocessing', verbose=10)(jobs)
-
-# # <<
 
 # --
 # Train
@@ -176,8 +176,6 @@ print('final_train_nll=%f' % np.mean(train_nll_history[-100:]), file=sys.stderr)
 print('final_valid_mse=%f' % np.mean(valid_mse_history), file=sys.stderr)
 print('final_valid_nll=%f' % np.mean(valid_nll_history), file=sys.stderr)
 
-raise Exception
-
 # --
 # Run BO experiment
 
@@ -185,10 +183,9 @@ def random_search(x_all, y_all, num_candidates=1000):
     num_candidates = min(num_candidates, x_all.shape[0])
     rand_sel  = np.random.choice(x_all.shape[0], num_candidates, replace=False)
     rand_y    = y_all[rand_sel].squeeze()
-    return pd.Series(rand_y).cummin().values
+    return cumming(rand_y)
 
 
-from copy import deepcopy
 def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.001, acq='ei', adjust_alpha=False):
     model = deepcopy(model)
     
@@ -253,13 +250,12 @@ def _run_one_bo(task_id, x_all, y_all):
 
 np.random.seed(123)
 
-model = model.cpu()
-model = model.eval()
+model = model.cpu().eval()
 
 dataset = valid_dataset
 
 # !! This seems to help, especially at the end of training
-# model.blr.sig_eps.data *= 10 # ?? This seems to help sometimes
+# model.blr.sig_eps.data *= 10
 
 jobs = []
 num_valid_tasks = len(dataset.task_ids)
@@ -277,7 +273,6 @@ res = Parallel(n_jobs=60, verbose=10)(jobs)
 # --
 # Plot
 
-df = valid_dataset.data
 def agg_and_plot(res, name, c='black', mode='abs'):
     if mode == 'percentile':
         adj    = np.stack([1 - (r[name].reshape(-1, 1) <= - df[df.task_id == r['task_id']].valid_score.values).mean(axis=-1) for r in res])
