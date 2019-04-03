@@ -24,7 +24,7 @@ from hoof.helpers import set_seeds, to_numpy, list2tensors, tensors2list, set_lr
 from hoof.bayesopt import gaussian_ei
 
 torch.set_num_threads(2)
-set_seeds(111)
+set_seeds(222)
 
 # --
 # Dataset
@@ -40,88 +40,88 @@ num_train_tasks = min(50, int(num_tasks * 0.8))
 task_ids = np.random.permutation(train_dataset.task_ids)
 train_dataset.task_ids, valid_dataset.task_ids = task_ids[:num_train_tasks], task_ids[num_train_tasks:]
 
-# # >>
+# >>
 
-# from skopt import Optimizer
+from skopt import Optimizer
 
-# df = valid_dataset.data
+df = valid_dataset.data
 
-# gp_param_cols = [
-#     "param_class_weight",
-#     "param_estimator",
-#     "param_max_features",
-#     "param_min_samples_leaf",
-#     "param_min_samples_split",
-# ]
-# X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
-# X_gp.valid_score = - X_gp.valid_score
+gp_param_cols = [
+    "param_class_weight",
+    "param_estimator",
+    "param_max_features",
+    "param_min_samples_leaf",
+    "param_min_samples_split",
+]
+X_gp = df[['task_id', 'valid_score'] + gp_param_cols]
+X_gp.valid_score = - X_gp.valid_score
 
-# X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
+X_gp.param_class_weight = X_gp.param_class_weight.fillna('none')
 
-# dimensions = []
-# for c in gp_param_cols:
-#     if X_gp[c].dtype == np.object_:
-#         uvals = list(np.unique(X_gp[c]))
-#         dimensions.append(uvals)
-#     else:
-#         dimensions.append((
-#             0.99 * X_gp[c].min(),
-#             1.01 * X_gp[c].max()
-#         ))
+dimensions = []
+for c in gp_param_cols:
+    if X_gp[c].dtype == np.object_:
+        uvals = list(np.unique(X_gp[c]))
+        dimensions.append(uvals)
+    else:
+        dimensions.append((
+            0.99 * X_gp[c].min(),
+            1.01 * X_gp[c].max()
+        ))
 
 
-# def cummin(x):
-#     return pd.Series(x).cummin().values
+def cummin(x):
+    return pd.Series(x).cummin().values
 
-# def _run_one_gp(task_id, sub, max_steps=80):
-#     X_cand = [list(xx) for xx in sub[gp_param_cols].values]
-#     lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
+def _run_one_gp(task_id, sub, max_steps=40):
+    X_cand = [list(xx) for xx in sub[gp_param_cols].values]
+    lookup = dict(zip(map(tuple, X_cand), sub.valid_score))
     
-#     y_opt  = sub.valid_score.min()
+    y_opt  = sub.valid_score.min()
     
-#     opt = Optimizer(
-#         dimensions=dimensions,
-#         base_estimator="GP",
-#         n_initial_points=3,
-#         acq_func="EI",
-#         acq_optimizer="sampling"
-#     )
+    opt = Optimizer(
+        dimensions=dimensions,
+        base_estimator="GP",
+        n_initial_points=3,
+        acq_func="EI",
+        acq_optimizer="sampling"
+    )
     
-#     opt._X_cand = X_cand
+    opt._X_cand = X_cand
     
-#     traj = []
-#     t    = time()
-#     for iteration in range(max_steps):
-#         if len(traj) and (np.min(traj) == y_opt):
-#             # If we've already found the best, just exit early
-#             next_y = np.min(traj)
-#         else:
-#             next_x = opt.ask()
-#             opt._X_cand.remove(next_x) # !! Never revisit
-#             next_y = lookup[tuple(next_x)]
-#             _ = opt.tell(next_x, next_y)
+    traj = []
+    t    = time()
+    for iteration in range(max_steps):
+        if len(traj) and (np.min(traj) == y_opt):
+            # If we've already found the best, just exit early
+            next_y = np.min(traj)
+        else:
+            next_x = opt.ask()
+            opt._X_cand.remove(next_x) # !! Never revisit
+            next_y = lookup[tuple(next_x)]
+            _ = opt.tell(next_x, next_y)
         
-#         traj.append(next_y)
+        traj.append(next_y)
     
-#     return {
-#         "task_id"    : task_id,
-#         "opt"        : y_opt,
-#         "gp"         : cummin(traj),
-#         "gp_elapsed" : time() - t
-#     }
+    return {
+        "task_id"    : task_id,
+        "opt"        : y_opt,
+        "gp"         : cummin(traj),
+        "gp_elapsed" : time() - t
+    }
 
 
-# task_ids = valid_dataset.task_ids
+task_ids = valid_dataset.task_ids
 
-# jobs = []
-# for _ in range(60):
-#     task_id  = np.random.choice(task_ids)
-#     sub      = X_gp[X_gp.task_id == task_id]
-#     jobs.append(delayed(_run_one_gp)(task_id, sub))
+jobs = []
+for _ in range(180):
+    task_id  = np.random.choice(task_ids)
+    sub      = X_gp[X_gp.task_id == task_id]
+    jobs.append(delayed(_run_one_gp)(task_id, sub))
 
-# gp_res = Parallel(n_jobs=60, backend='multiprocessing', verbose=10)(jobs)
+gp_res = Parallel(n_jobs=60, backend='multiprocessing', verbose=10)(jobs)
 
-# # # <<
+# <<
 
 # --
 # Train
@@ -185,13 +185,21 @@ def random_search(x_all, y_all, num_candidates=1000):
     rand_y    = y_all[rand_sel].squeeze()
     return pd.Series(rand_y).cummin().values
 
-def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.001, acq='ei'):
+
+from copy import deepcopy
+def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.001, acq='ei', adjust_alpha=False):
+    model = deepcopy(model)
+    
     burnin_sel = np.random.choice(x_all.shape[0], burnin_size, replace=False)
     x_visited, y_visited = x_all[burnin_sel], y_all[burnin_sel]
     
     traj = np.sort(y_visited.squeeze())[::-1]
     
-    for _ in range(num_rounds - burnin_size):
+    for iteration in range(num_rounds - burnin_size):
+        
+        if adjust_alpha and (iteration in [8, 16, 32, 64, 128, 256, 512]):
+            model.blr.alpha /= 2
+        
         # !! Simple way to force exploration
         explore = cdist(x_all, x_visited).min(axis=-1) > explore_eps
         if explore.any():
@@ -226,17 +234,16 @@ def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2, explore_eps=0.0
 def _run_one_bo(task_id, x_all, y_all):
     y_opt = y_all.min()
     
-    model_traj       = alpaca_bo(model, x_all, y_all, num_rounds=500)
-    # model_traj_noeps = alpaca_bo(model, x_all, y_all, num_rounds=500, explore_eps=0)
-    rand_traj        = random_search(x_all, y_all)
+    model_traj = alpaca_bo(model, x_all, y_all, num_rounds=500)
+    alpha_traj = alpaca_bo(model, x_all, y_all, num_rounds=500, adjust_alpha=True)
+    rand_traj  = random_search(x_all, y_all)
     
     return {
         "task_id" : task_id,
         "opt"     : y_opt,
         "model"   : np.array(model_traj),
+        "alpha"   : np.array(alpha_traj),
         "rand"    : np.array(rand_traj),
-        
-        # "model_traj_noeps" : np.array(model_traj_noeps),
     }
 
 # --
@@ -244,8 +251,9 @@ def _run_one_bo(task_id, x_all, y_all):
 
 np.random.seed(123)
 
-model   = model.cpu()
-model   = model.eval()
+model = model.cpu()
+model = model.eval()
+
 dataset = valid_dataset
 
 # !! This seems to help, especially at the end of training
@@ -253,7 +261,7 @@ dataset = valid_dataset
 
 jobs = []
 num_valid_tasks = len(dataset.task_ids)
-for _ in range(6):
+for _ in range(18):
     for task_id in dataset.task_ids:
         x_all, y_all = dataset.data_dict[task_id]
         job = delayed(_run_one_bo)(task_id, x_all, y_all)
@@ -268,38 +276,51 @@ res = Parallel(n_jobs=60, verbose=10)(jobs)
 # Plot
 
 df = valid_dataset.data
-def agg_and_plot(res, name, c='black'):
-    # adj    = np.stack([(xx['opt'] - xx[name]) / xx['opt'] for xx in res])
-    adj    = np.stack([(r[name].reshape(-1, 1) <= - df[df.task_id == r['task_id']].valid_score.values).mean(axis=-1) for r in res])
+def agg_and_plot(res, name, c='black', mode='abs'):
+    if mode == 'percentile':
+        adj    = np.stack([1 - (r[name].reshape(-1, 1) <= - df[df.task_id == r['task_id']].valid_score.values).mean(axis=-1) for r in res])
+    elif mode == 'abs':
+        adj    = np.stack([(xx['opt'] - xx[name]) / xx['opt'] for xx in res])
+    else:
+        raise Exception
+    
     mean   = np.mean(adj, axis=0)
     median = np.median(adj, axis=0)
     _ = plt.plot(mean, c=c, linewidth=3, label='mean(%s)' % name)
     _ = plt.plot(median, c=c, alpha=0.5, label='median(%s)' % name)
     _ = [plt.plot(xx, alpha=0.01, c=c) for xx in adj]
-    # _ = [plt.plot(
-    #         adj[np.random.choice(adj.shape[0], adj.shape[0])].mean(axis=0),alpha=0.01, c=c) 
-    #             for _ in range(512)]
     
     return adj
 
-model_adj = agg_and_plot(res, name='model', c='red')
-# agg_and_plot(res, name='model_traj_noeps', c='orange')
-rand_adj = agg_and_plot(res, name='rand', c='blue')
-gp_adj   = agg_and_plot(gp_res, name='gp', c='green')
+# Plot abs
+model_adj = agg_and_plot(res, name='model', c='red', mode='abs')
+alpha_adj = agg_and_plot(res, name='alpha', c='purple', mode='abs')
+rand_adj  = agg_and_plot(res, name='rand', c='blue', mode='abs')
+gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='abs')
 
-# _ = plt.xlim(0, 3)
 _ = plt.legend()
+_ = plt.ylim(1e-5, 1)
 _ = plt.title('ALPACA-BO vs RANDOM')
 _ = plt.xlabel('iteration')
 _ = plt.ylabel('(opt_score - score) / opt_score')
-# _ = plt.yscale('log')
-_ = plt.ylim(0.95, 1.0)
+_ = plt.yscale('log')
 _ = plt.xscale('log')
 _ = plt.grid()
 show_plot()
 
-model_adj[:,-1].mean()
-rand_adj[:,model_adj.shape[1]].mean()
+# Plot percentile
+model_adj = agg_and_plot(res, name='model', c='red', mode='percentile')
+alpha_adj = agg_and_plot(res, name='alpha', c='purple', mode='percentile')
+rand_adj  = agg_and_plot(res, name='rand', c='blue', mode='percentile')
+gp_adj    = agg_and_plot(gp_res, name='gp', c='green', mode='percentile')
 
+_ = plt.legend()
+_ = plt.title('ALPACA-BO vs RANDOM')
+_ = plt.xlabel('iteration')
+_ = plt.ylabel('percentile')
+_ = plt.xscale('log')
+_ = plt.yscale('log')
+_ = plt.grid()
+show_plot()
 
 

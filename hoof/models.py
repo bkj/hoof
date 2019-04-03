@@ -44,9 +44,11 @@ class BLR(nn.Module):
         
         self.input_dim  = input_dim
         self.output_dim = output_dim
+        
+        self.alpha = 1
     
     def forward(self, phi_support, y_support, phi_query, y_query=None):
-        S_inv_prior = self.S_inv_prior_asym @ self.S_inv_prior_asym.t()
+        S_inv_prior = self.alpha * self.S_inv_prior_asym @ self.S_inv_prior_asym.t()
         m_prior     = S_inv_prior @ self.m_prior
         
         nobs = phi_support.shape[1]
@@ -63,12 +65,13 @@ class BLR(nn.Module):
         spread_fac = 1 + self._batch_quadform1(S, phi_query)
         sig        = torch.einsum('...i,jk->...ijk', spread_fac, self.eye * self.sig_eps)
         
-        predictive_nll = None
+        nll = None
         if y_query is not None:
-            quadf = self._batch_quadform2(torch.inverse(sig), y_query - mu)
-            predictive_nll = self._sig_logdet(spread_fac).mean() + quadf.mean()
+            logdet = self._sig_logdet(spread_fac)
+            quadf  = self._batch_quadform2(torch.inverse(sig), y_query - mu)
+            nll    = logdet.mean() + quadf.mean()
         
-        return mu, sig, predictive_nll
+        return mu, sig, nll
     
     def _batch_quadform1(self, A, b):
         # Eq 8 helper
@@ -84,6 +87,14 @@ class BLR(nn.Module):
         # Compute logdet(sig)
         # Equivalent to [[ss.logdet() for ss in s] for s in sig]
         return self.output_dim * (spread_fac.log() + torch.log(self.sig_eps))
+
+# Per Murphy "Machine Learning: A probabalistic perspective"
+# 1) Should have 1 / sig_eps factor for every phi_support.transpose(1, 2)
+# 2) And should be 
+#       spread_fac = self.sig_eps + self._batch_quadform1(S, phi_query)
+# 3) And _sig_logdet should be updated
+# I think that not including this mean the priors get weighted in a non-standard way
+# Maybe that's good?  Maybe it's bad?
 
 # --
 # NN Helper
