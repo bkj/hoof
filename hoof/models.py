@@ -30,7 +30,7 @@ class BLR(nn.Module):
         
         self.sig_eps     = sig_eps
         self.log_sig_eps = np.log(sig_eps)
-        self.register_buffer('sig_eps_eye', torch.eye(output_dim) * self.sig_eps)
+        self.register_buffer('eye', torch.eye(output_dim))
         
         self.K      = nn.Parameter(torch.zeros(input_dim, output_dim))
         self.L_asym = nn.Parameter(torch.randn(input_dim, input_dim))
@@ -59,7 +59,7 @@ class BLR(nn.Module):
         spread_fac = 1 + self._batch_quadform1(posterior_L_inv, phi_query)
         
         # Expand each element of spread_fac to y_dim diagonal matrix
-        sig_pred = torch.einsum('...i,jk->...ijk', spread_fac, self.sig_eps_eye)
+        sig_pred = torch.einsum('...i,jk->...ijk', spread_fac, self.eye * self.sig_eps)
         
         predictive_nll = None
         if y_query is not None:

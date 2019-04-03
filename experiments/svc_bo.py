@@ -78,15 +78,27 @@ def random_search(x_all, y_all, num_candidates=500):
     rand_y    = y_all[rand_sel].squeeze()
     return pd.Series(rand_y).cummin().values
 
+
+def make_target(model, inp):
+    def _target(p):
+        model.blr.sig_eps     = float(10 ** p)
+        model.blr.log_sig_eps = np.log(float(10 ** p))
+        return float(model(*inp)[-1])
+    
+    return _target
+
+from scipy.optimize import minimize
+
 def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2):
     burnin_sel = np.random.choice(x_all.shape[0], burnin_size, replace=False)
     x_visited, y_visited = x_all[burnin_sel], y_all[burnin_sel]
     
     traj = np.sort(y_visited.squeeze())[::-1]
     
-    for _ in range(num_rounds):
+    sig_visited = []
+    for i in range(num_rounds):
         # !! Simple way to force exploration
-        explore = cdist(x_all, x_visited).min(axis=-1) > 0.05
+        explore = cdist(x_all, x_visited).min(axis=-1) > -1
         x_cand, y_cand = x_all[explore], y_all[explore]
         
         inp = list2tensors((x_visited, y_visited, x_cand), cuda=model.is_cuda)
@@ -96,17 +108,31 @@ def alpaca_bo(model, x_all, y_all, num_rounds=20, burnin_size=2):
         ei = gaussian_ei(mu, sig, incumbent=y_visited.min())
         
         best_idx = ei.argmax()
-        next_x, next_y = x_cand[best_idx], y_cand[best_idx]
+        next_x, next_y, next_sig = x_cand[best_idx], y_cand[best_idx], sig[best_idx]
         
-        x_visited = np.vstack([x_visited, next_x])
-        y_visited = np.vstack([y_visited, next_y])
+        x_visited   = np.vstack([x_visited, next_x])
+        y_visited   = np.vstack([y_visited, next_y])
+        sig_visited = np.hstack([sig_visited, next_sig])
         
         traj = np.hstack([traj, [y_visited.min()]])
     
-    return traj
-
+    return traj, x_visited, y_visited, sig_visited
 
 dataset = valid_dataset
+
+task_id      = np.random.choice(dataset.task_ids)
+x_all, y_all = dataset.data_dict[task_id]
+y_opt        = y_all.min()
+
+model_traj, x_visited, y_visited, sig_visited = alpaca_bo(model, x_all, y_all)
+
+_ = plt.scatter(x_visited[:,0], x_visited[:,1], alpha=0.25)
+show_plot()
+
+# _ = plt.plot(y_visited)
+_ = plt.plot(sig_visited)
+show_plot()
+
 
 res = []
 for _ in trange(100):
@@ -115,28 +141,34 @@ for _ in trange(100):
     x_all, y_all = dataset.data_dict[task_id]
     y_opt        = y_all.min()
     
-    model_traj = alpaca_bo(model, x_all, y_all)
+    # model_traj_tune = alpaca_bo(model, x_all, y_all, tune_sig_eps=True)
+    model_traj, x_visited = alpaca_bo(model, x_all, y_all, tune_sig_eps=False)
     rand_traj  = random_search(x_all, y_all)
     
     res.append({
         "task_id" : task_id,
         "opt"     : y_opt,
         "model"   : np.array(model_traj),
+        # "model_tune"   : np.array(model_traj_tune),
         "rand"    : np.array(rand_traj),
     })
 
 
-model_adj  = [(xx['opt'] - xx['model']) / xx['opt'] for xx in res]
-rand_adj   = [(xx['opt'] - xx['rand']) / xx['opt'] for xx in res]
+model_adj       = [(xx['opt'] - xx['model']) / xx['opt'] for xx in res]
+# model_tune_adj  = [(xx['opt'] - xx['model_tune']) / xx['opt'] for xx in res]
+rand_adj        = [(xx['opt'] - xx['rand']) / xx['opt'] for xx in res]
 
-_ = plt.plot(np.stack(model_adj).mean(axis=0), c='red')
+_ = plt.plot(np.mean(np.stack(model_adj), axis=0), c='red')
 _ = [plt.plot(xx, alpha=0.01, c='red') for xx in model_adj]
 
-_ = plt.plot(np.stack(rand_adj).mean(axis=0), c='black')
+# _ = plt.plot(np.mean(np.stack(model_tune_adj), axis=0), c='blue')
+# _ = [plt.plot(xx, alpha=0.01, c='blue') for xx in model_tune_adj]
+
+_ = plt.plot(np.mean(np.stack(rand_adj), axis=0), c='black')
 _ = [plt.plot(xx, alpha=0.01, c='black') for xx in rand_adj]
 
 _ = plt.xlim(0, 35)
-_ = plt.ylim(0, 0.1)
+_ = plt.ylim(0, 0.05)
 show_plot()
 
 
