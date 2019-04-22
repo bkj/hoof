@@ -2,6 +2,11 @@
 
 """
     exline/bulk2/rf_bulk.py
+    
+    !! Multiple ALPACA models
+    !! Bix BO and ALPACA
+    !! Compare DNGO to ALPACA
+    !! Train basis w/ ALPACA, then finetune w/ DNGO per task
 """
 
 import sys
@@ -11,13 +16,15 @@ import warnings
 warnings.warn = warn
 
 import numpy as np
+import pandas as pd
 np.warnings.filterwarnings('ignore')
 
 import os
 import sys
 import json
-import argparse
 import openml
+import argparse
+from copy import copy
 from time import time
 from tqdm import tqdm
 from uuid import uuid4
@@ -128,6 +135,7 @@ def cs2vec(cfg):
         cfg['estimator'] == "RandomForest",
     ])
 
+
 def vec2cs(vec):
     tmp = {
         'class_weight'      : vec[0],
@@ -154,7 +162,10 @@ def gp_live(prob_name, sub, dimensions, max_steps=40):
         base_estimator="GP",
         n_initial_points=5,
         acq_func="EI",
-        acq_optimizer="sampling"
+        acq_optimizer="sampling",
+        acq_optimizer_kwargs={
+            "n_points" : N_POINTS,
+        }
     )
     opt._X_cand = None
     
@@ -187,7 +198,8 @@ def gp_live(prob_name, sub, dimensions, max_steps=40):
     return np.array(traj), all_output
 
 
-from copy import copy
+N_POINTS = 1000
+
 def alpaca_bo_live(model, prob_name, num_rounds=20, burnin_size=2, explore_eps=0.001, acq='ei', adjust_alpha=False):
     model = deepcopy(model)
     
@@ -233,7 +245,7 @@ def alpaca_bo_live(model, prob_name, num_rounds=20, burnin_size=2, explore_eps=0
         if adjust_alpha and (iteration in [8, 16, 32, 64, 128, 256, 512]):
             model.blr.alpha /= 2
         
-        cs_cand = cs.sample_configurations(n=5000)
+        cs_cand = cs.sample_configurations(n=N_POINTS)
         x_cand  = np.stack([cs2vec(xx) for xx in cs_cand])
         
         inp = list2tensors((x_visited, y_visited, x_cand), cuda=model.is_cuda)
@@ -278,8 +290,8 @@ for it in range(10):
     for prob_name in task_ids:
         sub = df[df.task_id == prob_name]
         
-        model_traj, model_output = alpaca_bo_live(model, prob_name, num_rounds=1, adjust_alpha=True)
-        gp_traj, gp_output       = gp_live(prob_name, sub, max_steps=1, dimensions=dimensions)
+        model_traj, model_output = alpaca_bo_live(model, prob_name, num_rounds=80, adjust_alpha=True)
+        gp_traj, gp_output       = gp_live(prob_name, sub, max_steps=40, dimensions=dimensions)
         
         print(it, prob_name, model_traj.min(), gp_traj.min(), -sub.valid_score.max())
         
@@ -289,4 +301,45 @@ for it in range(10):
             "gp_traj"      : gp_traj,
             "gp_output"    : gp_output,
         }
+
+
+k = list(all_results.keys())[0]
+all_results[k]['model_traj']
+
+z = []
+for k,v in all_results.items():
+    z.append({
+        'prob_name' : k[1],
+        'gp'        : cummin(all_results[k]['gp_traj'])[-1],
+        'model'     : cummin(all_results[k]['model_traj'][:40])[-1],
+    })
+
+z = pd.DataFrame(z)
+
+z.groupby('prob_name').apply(lambda x: (x['gp'] < x['model']).mean())
+(z['gp'] > z['model']).mean()
+
+
+
+
+len(all_results[k]['model_traj'])
+
+
+best_scores = valid_dataset.data.groupby('prob_name').valid_score.max().to_dict()
+
+z[z.prob_name == task_ids[0]]
+
+prob_name = task_ids[1]
+best_score = best_scores[prob_name]
+for i in range(10):
+    tmp = all_results[(i, prob_name)]
+    
+    _ = plt.plot(tmp['model_traj'][:40] + best_score, alpha=0.25, c='red')
+    _ = plt.plot(tmp['gp_traj'] + best_score, alpha=0.25, c='blue')
+
+_ = plt.yscale('log')
+show_plot()
+
+
+
 
